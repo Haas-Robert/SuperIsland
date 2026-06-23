@@ -593,7 +593,7 @@ final class ShelfStore: ObservableObject {
 
     private func removeManagedImages(for items: [ShelfItem]) {
         for item in items {
-            guard item.kind == .image,
+            guard item.kind == .image || item.kind == .file,
                   let url = item.resolvedFileURL,
                   isManagedImageURL(url) else { continue }
             try? FileManager.default.removeItem(at: url)
@@ -667,6 +667,21 @@ final class ShelfStore: ObservableObject {
            let item = imageItem(from: data, type: .image, suggestedName: provider.suggestedName) {
             NSLog("[Shelf] image branch → %@", item.displayName)
             return item
+        }
+
+        // Promised-file drag for non-image file types (e.g. TXT, MD, RTF).
+        // Finder may advertise only the content type without public.file-url on
+        // some macOS versions — the same pattern already handled for images above.
+        if let docTypeIdentifier = provider.registeredTypeIdentifiers.first(where: { identifier in
+            guard let type = UTType(identifier) else { return false }
+            return !type.conforms(to: .image)
+                && !type.conforms(to: .url)
+                && type.conforms(to: .data)
+        }) {
+            if let url = await loadPromisedFile(from: provider, typeIdentifier: docTypeIdentifier) {
+                NSLog("[Shelf] promised-file branch → %@", url.lastPathComponent)
+                return .file(from: url)
+            }
         }
 
         for type in [UTType.utf8PlainText, .plainText, .text] {
@@ -757,10 +772,10 @@ final class ShelfStore: ObservableObject {
             return URL(dataRepresentation: data, relativeTo: nil)
         }
         if let string = item as? String {
-            return URL(string: string)
+            return URL(string: string) ?? URL(fileURLWithPath: string)
         }
         if let string = item as? NSString {
-            return URL(string: string as String)
+            return URL(string: string as String) ?? URL(fileURLWithPath: string as String)
         }
 
         return nil
