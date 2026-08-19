@@ -29,7 +29,12 @@ final class IslandPanel: NSPanel {
             defer: false
         )
 
-        level = .statusBar
+        // One step above .statusBar: menu bar managers (Ice, Bartender,
+        // HiddenBar) draw their overflow bars at the .statusBar level, and
+        // within the same level whichever window ordered last wins — their
+        // bar would cover the island whenever it appears. Staying below
+        // .popUpMenu keeps menus and dropdowns above the island.
+        level = NSWindow.Level(rawValue: NSWindow.Level.statusBar.rawValue + 1)
         collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle]
         isOpaque = false
         backgroundColor = .clear
