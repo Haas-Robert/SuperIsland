@@ -966,6 +966,29 @@ final class AppState: ObservableObject {
         currentState == .fullExpanded && currentContentTopInset > 0 && fullExpandedShoulderGapWidth > 0
     }
 
+    /// True when the enabled module tabs cannot all fit in the leading notch
+    /// shoulder. The full-expanded layout then adds a dedicated full-width tab
+    /// row (and the island grows by that row's height) so no tab stays hidden.
+    var fullExpandedTabsOverflowShoulder: Bool {
+        guard presentationHasNotch, let notch = currentNotchRect else { return false }
+        let metrics = FullExpandedShoulderMetrics.self
+        let shoulderGap = notch.width + 20
+        let availableForModules = Constants.fullExpandedSize.width
+            - (metrics.horizontalPadding * 2)
+            - shoulderGap
+            - metrics.trailingControlsSlotWidth
+            - metrics.iconTabWidth
+            - metrics.tabSpacing
+        // Same filter as the tab bar: home lives outside the strip and the
+        // notifications module has its own trailing button.
+        let moduleCount = fullExpandedTabs.filter { tab in
+            if tab == .home { return false }
+            if case .module(.builtIn(.notifications)) = tab { return false }
+            return true
+        }.count
+        return metrics.moduleTabsWidth(count: moduleCount) > availableForModules
+    }
+
     var fullExpandedShoulderGapWidth: CGFloat {
         guard currentState == .fullExpanded,
               let notch = currentNotchRect else {
@@ -1094,6 +1117,15 @@ final class AppState: ObservableObject {
             // so it eats into content height. Add space for it.
             if usesOutwardTopCorners && !presentationHasNotch {
                 return CGSize(width: base.width, height: base.height + 50)
+            }
+            // With more module tabs than the notch shoulder can hold, a
+            // dedicated tab row is shown — grow the island so it doesn't
+            // eat into module content.
+            if fullExpandedTabsOverflowShoulder {
+                return CGSize(
+                    width: base.width,
+                    height: base.height + FullExpandedShoulderMetrics.tabStripRowHeight
+                )
             }
             return base
         }
