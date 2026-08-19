@@ -1,5 +1,25 @@
 import SwiftUI
 
+/// Shared metrics for the full-expanded shoulder bar, used by the views and
+/// by AppState when sizing the island so every module tab fits beside Home.
+enum FullExpandedShoulderMetrics {
+    static let horizontalPadding: CGFloat = 40
+    static let tabSpacing: CGFloat = 8
+    static let iconTabWidth: CGFloat = 36
+    static let trailingControlsSlotWidth: CGFloat = 168
+
+    static func moduleTabsWidth(count: Int) -> CGFloat {
+        guard count > 0 else { return 0 }
+        let n = CGFloat(count)
+        return (iconTabWidth * n) + (tabSpacing * (n - 1)) + 4
+    }
+
+    /// Width the leading shoulder needs to show Home plus every module tab.
+    static func leadingShoulderWidth(moduleCount: Int) -> CGFloat {
+        iconTabWidth + tabSpacing + moduleTabsWidth(count: moduleCount)
+    }
+}
+
 struct FullExpandedView: View {
     @EnvironmentObject var appState: AppState
 
@@ -109,11 +129,11 @@ struct FullExpandedTopBarView: View {
 
     let layout: FullExpandedTopBarLayout
 
-    private let shoulderHorizontalPadding: CGFloat = 40
+    private let shoulderHorizontalPadding = FullExpandedShoulderMetrics.horizontalPadding
     private let shoulderTopPadding: CGFloat = 2
-    private let shoulderTabSpacing: CGFloat = 8
-    private let iconTabWidth: CGFloat = 36
-    private let trailingControlsSlotWidth: CGFloat = 168
+    private let shoulderTabSpacing = FullExpandedShoulderMetrics.tabSpacing
+    private let iconTabWidth = FullExpandedShoulderMetrics.iconTabWidth
+    private let trailingControlsSlotWidth = FullExpandedShoulderMetrics.trailingControlsSlotWidth
     private let shoulderLeadingInset: CGFloat = 0
     private let settingsLeadingInset: CGFloat = 4
 
@@ -445,7 +465,12 @@ struct FullExpandedTopBarView: View {
     }
 
     private var leadingShoulderWidth: CGFloat {
-        max(0, shoulderAvailableWidth - shoulderGapWidth - trailingControlsSlotWidth - shoulderLeadingInset)
+        // Symmetric around the camera housing: the leading shoulder ends
+        // exactly where the reserved camera gap starts, so when the island
+        // is wider than the default the tabs grow toward the camera without
+        // ever sliding under it. The trailing controls keep their fixed slot
+        // inside the (equally sized) trailing shoulder.
+        max(0, (shoulderAvailableWidth - shoulderGapWidth) / 2 - shoulderLeadingInset)
     }
 
     private var leadingScrollableWidth: CGFloat {
