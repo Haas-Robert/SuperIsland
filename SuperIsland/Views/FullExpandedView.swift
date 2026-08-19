@@ -531,11 +531,13 @@ private struct FullExpandedTabButton: View {
     var showsTitle: Bool = true
     let action: () -> Void
 
+    @State private var isHovered = false
+
     var body: some View {
         Button(action: action) {
             HStack(spacing: 6) {
                 tabIcon
-                    .foregroundColor(.white.opacity(isSelected ? 0.96 : 0.72))
+                    .foregroundColor(.white.opacity(iconOpacity))
 
                 if showsTitle && isSelected {
                     Text(tab.title)
@@ -559,17 +561,44 @@ private struct FullExpandedTabButton: View {
                     )
                     .overlay(
                         Capsule(style: .continuous)
-                            .fill(Color.white.opacity(isSelected ? 0.05 : 0.02))
+                            .fill(Color.white.opacity(fillOpacity))
                     )
             )
             .overlay(
                 Capsule(style: .continuous)
-                    .stroke(Color.white.opacity(isSelected ? 0.12 : 0.08), lineWidth: 1)
+                    .stroke(Color.white.opacity(strokeOpacity), lineWidth: isSelected ? 1.5 : 1)
             )
+            .scaleEffect(isHovered && !isSelected ? 1.08 : 1.0)
         }
         .buttonStyle(.plain)
+        .onHover { hovering in
+            withAnimation(.easeOut(duration: 0.12)) {
+                isHovered = hovering
+            }
+        }
         .hoverPointer()
         .help(tab.title)
+    }
+
+    // The island surface is near-black, so the resting states stay dark and
+    // the hovered/selected states jump well above it — a subtle 2–5 % fill
+    // was indistinguishable from the background.
+    private var fillOpacity: Double {
+        if isSelected { return 0.22 }
+        if isHovered { return 0.12 }
+        return 0.02
+    }
+
+    private var strokeOpacity: Double {
+        if isSelected { return 0.42 }
+        if isHovered { return 0.24 }
+        return 0.08
+    }
+
+    private var iconOpacity: Double {
+        if isSelected { return 1.0 }
+        if isHovered { return 0.95 }
+        return 0.72
     }
 
     @ViewBuilder
