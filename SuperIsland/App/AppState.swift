@@ -546,6 +546,10 @@ final class AppState: ObservableObject {
     func handleHoverChange(_ hovering: Bool) {
         let wasHovering = isHovering
         isHovering = hovering
+        // TEMP-DEBUG(rob): trace hover flapping — remove after diagnosis.
+        if hovering != wasHovering {
+            NSLog("SuperIsland hover-debug: hovering=%d state=\(currentState) mouse=\(NSEvent.mouseLocation)", hovering ? 1 : 0)
+        }
 
         if isShelfDragActive {
             cancelAutoDismiss()

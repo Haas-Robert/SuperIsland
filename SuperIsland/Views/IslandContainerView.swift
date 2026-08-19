@@ -418,6 +418,9 @@ struct IslandContainerView: View {
         // Multi-display: hover is valid if the pointer is over ANY island.
         guard !islandPanels.contains(where: { $0.frame.contains(pointerLocation) }) else { return }
 
+        // TEMP-DEBUG(rob): trace hover flapping — remove after diagnosis.
+        NSLog("SuperIsland hover-debug: validation force-unhover, pointer=\(pointerLocation) frames=\(islandPanels.map { NSStringFromRect($0.frame) })")
+
         isHoveringIslandSurface = false
         isHoveringPreviousButton = false
         isHoveringNextButton = false
