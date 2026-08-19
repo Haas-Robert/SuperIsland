@@ -210,6 +210,16 @@ struct FullExpandedTopBarView: View {
                 }
                 .frame(width: shoulderModuleViewportWidth, alignment: .leading)
                 .clipped()
+                .mask(shoulderModuleStripMask)
+                .overlay(alignment: .trailing) {
+                    if shoulderModulesOverflow {
+                        Image(systemName: "chevron.compact.right")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundStyle(.white.opacity(0.5))
+                            .offset(x: 4)
+                            .allowsHitTesting(false)
+                    }
+                }
                 .onAppear {
                     scrollShoulderTabs(with: proxy, animated: false)
                 }
@@ -389,10 +399,38 @@ struct FullExpandedTopBarView: View {
         }
     }
 
+    /// Total width the module tabs would need if none were hidden.
+    private var shoulderModuleContentWidth: CGFloat {
+        let count = CGFloat(moduleTabs.count)
+        guard count > 0 else { return 0 }
+        return (iconTabWidth * count) + (shoulderTabSpacing * (count - 1)) + 4
+    }
+
+    /// Use every point the leading shoulder offers instead of capping the
+    /// viewport at a fixed tab count; the strip scrolls only when the tabs
+    /// genuinely overflow the available width.
     private var shoulderModuleViewportWidth: CGFloat {
-        let visibleModuleCount: CGFloat = 3
-        let contentWidth = (iconTabWidth * visibleModuleCount) + (shoulderTabSpacing * max(0, visibleModuleCount - 1)) + 4
-        return min(leadingScrollableWidth, contentWidth)
+        min(leadingScrollableWidth, shoulderModuleContentWidth)
+    }
+
+    private var shoulderModulesOverflow: Bool {
+        shoulderModuleContentWidth > leadingScrollableWidth
+    }
+
+    /// Fades out the trailing edge of the module strip when more tabs hide
+    /// past it, hinting that the strip scrolls.
+    private var shoulderModuleStripMask: some View {
+        HStack(spacing: 0) {
+            Rectangle().fill(Color.black)
+            if shoulderModulesOverflow {
+                LinearGradient(
+                    colors: [.black, .clear],
+                    startPoint: .leading,
+                    endPoint: .trailing
+                )
+                .frame(width: 22)
+            }
+        }
     }
 
     private var shoulderAvailableWidth: CGFloat {
