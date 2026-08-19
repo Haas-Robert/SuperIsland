@@ -4,8 +4,10 @@
 
 set -euo pipefail
 
-APP_NAME="SuperIsland"
-SCHEME="${APP_NAME}"
+# rob/local-build: the product is renamed (see project.yml) but the
+# xcodegen target/scheme is still "SuperIsland".
+APP_NAME="SuperIsland Rob"
+SCHEME="SuperIsland"
 BUILD_DIR="build"
 DERIVED_DATA="${BUILD_DIR}/DerivedData"
 APP_PATH="${BUILD_DIR}/${APP_NAME}.app"
