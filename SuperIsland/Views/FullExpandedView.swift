@@ -1,5 +1,22 @@
 import SwiftUI
 
+/// Shared metrics for the full-expanded shoulder bar, used both by the views
+/// and by AppState when it decides whether every module tab fits beside the
+/// notch or the layout needs a dedicated tab row.
+enum FullExpandedShoulderMetrics {
+    static let horizontalPadding: CGFloat = 40
+    static let tabSpacing: CGFloat = 8
+    static let iconTabWidth: CGFloat = 36
+    static let trailingControlsSlotWidth: CGFloat = 168
+    static let tabStripRowHeight: CGFloat = 44
+
+    static func moduleTabsWidth(count: Int) -> CGFloat {
+        guard count > 0 else { return 0 }
+        let n = CGFloat(count)
+        return (iconTabWidth * n) + (tabSpacing * (n - 1)) + 4
+    }
+}
+
 struct FullExpandedView: View {
     @EnvironmentObject var appState: AppState
 
@@ -7,6 +24,12 @@ struct FullExpandedView: View {
         VStack(spacing: 0) {
             if !appState.hasFullExpandedShoulderBarSpace {
                 FullExpandedTopBarView(layout: .inline)
+                    .environmentObject(appState)
+                    .padding(.bottom, 8)
+            } else if appState.fullExpandedTabsOverflowShoulder {
+                // The notch shoulder can't fit every module tab — show them
+                // all in a dedicated row where the island has full width.
+                FullExpandedTabStripView()
                     .environmentObject(appState)
                     .padding(.bottom, 8)
             }
@@ -97,6 +120,63 @@ struct FullExpandedView: View {
     }
 }
 
+/// Full-width row with every module tab, used when the notch shoulder is too
+/// narrow to show them all. Home stays in the shoulder next to the camera.
+struct FullExpandedTabStripView: View {
+    @EnvironmentObject private var appState: AppState
+
+    var body: some View {
+        Group {
+            if stripFits {
+                tabRow
+                    .frame(maxWidth: .infinity, alignment: .center)
+            } else {
+                ScrollViewReader { proxy in
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        tabRow
+                            .padding(.horizontal, 8)
+                    }
+                    .onChange(of: appState.fullExpandedSelectedTab) { _, newTab in
+                        withAnimation(.easeInOut(duration: 0.22)) {
+                            proxy.scrollTo(newTab.id, anchor: .center)
+                        }
+                    }
+                }
+            }
+        }
+        .frame(height: FullExpandedShoulderMetrics.tabStripRowHeight, alignment: .center)
+    }
+
+    private var tabRow: some View {
+        HStack(spacing: FullExpandedShoulderMetrics.tabSpacing) {
+            ForEach(moduleTabs) { tab in
+                FullExpandedTabButton(
+                    tab: tab,
+                    isSelected: tab == appState.fullExpandedSelectedTab,
+                    showsTitle: false
+                ) {
+                    appState.selectFullExpandedTab(tab)
+                }
+                .frame(width: FullExpandedShoulderMetrics.iconTabWidth)
+                .id(tab.id)
+            }
+        }
+    }
+
+    private var moduleTabs: [FullExpandedTab] {
+        appState.fullExpandedTabs.filter { tab in
+            if tab == .home { return false }
+            if case .module(.builtIn(.notifications)) = tab { return false }
+            return true
+        }
+    }
+
+    private var stripFits: Bool {
+        let contentWidth = FullExpandedShoulderMetrics.moduleTabsWidth(count: moduleTabs.count)
+        return contentWidth <= appState.currentContentSize.width - 32
+    }
+}
+
 enum FullExpandedTopBarLayout {
     case inline
     case shoulder
@@ -109,11 +189,11 @@ struct FullExpandedTopBarView: View {
 
     let layout: FullExpandedTopBarLayout
 
-    private let shoulderHorizontalPadding: CGFloat = 40
+    private let shoulderHorizontalPadding = FullExpandedShoulderMetrics.horizontalPadding
     private let shoulderTopPadding: CGFloat = 2
-    private let shoulderTabSpacing: CGFloat = 8
-    private let iconTabWidth: CGFloat = 36
-    private let trailingControlsSlotWidth: CGFloat = 168
+    private let shoulderTabSpacing = FullExpandedShoulderMetrics.tabSpacing
+    private let iconTabWidth = FullExpandedShoulderMetrics.iconTabWidth
+    private let trailingControlsSlotWidth = FullExpandedShoulderMetrics.trailingControlsSlotWidth
     private let shoulderLeadingInset: CGFloat = 0
     private let settingsLeadingInset: CGFloat = 4
 
@@ -191,34 +271,39 @@ struct FullExpandedTopBarView: View {
             }
             .frame(width: iconTabWidth)
 
-            ScrollViewReader { proxy in
-                ScrollView(.horizontal, showsIndicators: false) {
-                    LazyHStack(spacing: shoulderTabSpacing) {
-                        ForEach(moduleTabs) { tab in
-                            FullExpandedTabButton(
-                                tab: tab,
-                                isSelected: tab == appState.fullExpandedSelectedTab,
-                                showsTitle: false
-                            ) {
-                                appState.selectFullExpandedTab(tab)
+            // When the tabs overflow the shoulder they render in a dedicated
+            // full-width row instead (FullExpandedTabStripView) — keeping a
+            // second partial copy here would just duplicate icons.
+            if !appState.fullExpandedTabsOverflowShoulder {
+                ScrollViewReader { proxy in
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        LazyHStack(spacing: shoulderTabSpacing) {
+                            ForEach(moduleTabs) { tab in
+                                FullExpandedTabButton(
+                                    tab: tab,
+                                    isSelected: tab == appState.fullExpandedSelectedTab,
+                                    showsTitle: false
+                                ) {
+                                    appState.selectFullExpandedTab(tab)
+                                }
+                                .frame(width: iconTabWidth)
+                                .id(tab.id)
                             }
-                            .frame(width: iconTabWidth)
-                            .id(tab.id)
                         }
+                        .padding(.horizontal, 2)
                     }
-                    .padding(.horizontal, 2)
-                }
-                .frame(width: shoulderModuleViewportWidth, alignment: .leading)
-                .clipped()
-                .onAppear {
-                    scrollShoulderTabs(with: proxy, animated: false)
-                }
-                .onChange(of: appState.fullExpandedSelectedTab) { _, _ in
-                    scrollShoulderTabs(with: proxy, animated: true)
-                }
-                .onChange(of: appState.currentState) { _, newState in
-                    if newState == .fullExpanded {
+                    .frame(width: shoulderModuleViewportWidth, alignment: .leading)
+                    .clipped()
+                    .onAppear {
                         scrollShoulderTabs(with: proxy, animated: false)
+                    }
+                    .onChange(of: appState.fullExpandedSelectedTab) { _, _ in
+                        scrollShoulderTabs(with: proxy, animated: true)
+                    }
+                    .onChange(of: appState.currentState) { _, newState in
+                        if newState == .fullExpanded {
+                            scrollShoulderTabs(with: proxy, animated: false)
+                        }
                     }
                 }
             }
