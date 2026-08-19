@@ -202,6 +202,9 @@ branch/merge from `rob/local-build`, and update the table below.
 | Claude usage rate limits | PR #98 open (2026-08-19) | `6301400` | yes |
 | Full-expanded tab strip + adaptive island width | PR #99 open (2026-08-19) | `5b02ef6` | yes |
 | Island collapse loop at top screen edge | PR #100 open (2026-08-19) | `3940d6f` | yes |
+| Tab icon contrast + hover/selected states | part of PR #99 (2026-08-19) | `4bcece2` | yes |
+| Island above menu bar managers (Ice) | PR #101 open (2026-08-19) | `025d710` | yes |
+| Notch side slots + compact notifications | PR #102 open (2026-08-19) | `7a5f203` | yes |
 
 Local-only additions (never for upstream): IP geolocation Weather fallback
 (`0d8a5da`), product identity (`SuperIsland Rob`).
