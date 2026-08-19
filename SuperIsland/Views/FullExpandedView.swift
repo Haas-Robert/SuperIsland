@@ -390,8 +390,11 @@ struct FullExpandedTopBarView: View {
     }
 
     private var shoulderModuleViewportWidth: CGFloat {
-        let visibleModuleCount: CGFloat = 3
-        let contentWidth = (iconTabWidth * visibleModuleCount) + (shoulderTabSpacing * max(0, visibleModuleCount - 1)) + 4
+        // Show every module tab that fits in the leading shoulder instead of
+        // capping the viewport at a fixed count; the strip only scrolls once
+        // the tabs genuinely overflow the available width.
+        let moduleCount = CGFloat(moduleTabs.count)
+        let contentWidth = (iconTabWidth * moduleCount) + (shoulderTabSpacing * max(0, moduleCount - 1)) + 4
         return min(leadingScrollableWidth, contentWidth)
     }
 
