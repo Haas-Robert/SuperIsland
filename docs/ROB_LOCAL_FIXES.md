@@ -130,6 +130,30 @@ Consequences of the separate bundle ID (one-time, expected):
 - settings/UserDefaults start fresh (module layout, onboarding), the domain
   is `com.workview.SuperIsland.rob`.
 
+## Local addition: IP geolocation fallback for Weather (rob/local-build only)
+
+Macs have no GPS — Core Location works purely from Wi-Fi AP triangulation.
+On an iPhone personal hotspot (mobile AP, no neighbors in Apple's database)
+locationd cannot compute any position for any app, so Weather would stay
+empty even with the delegate fix. `WeatherManager` therefore falls back to
+coarse IP-based coordinates (`https://get.geojs.io/v1/ip/geo.json`, HTTPS,
+no API key) when:
+
+- Core Location reports an error, or
+- no fix arrives within 15 s of starting updates, or
+- location permission is denied/restricted.
+
+Rules: a real Core Location fix always wins and immediately replaces IP
+data (bypassing the 5-minute debounce once); the IP lookup itself is
+debounced to once per 5 minutes; the location name is prefixed with `~`
+(e.g. "~Praha") to mark the estimate; coordinates are never logged. On a
+hotspot the IP position is the carrier's egress point — city-level at best.
+
+This is intentionally NOT part of the upstream `fix/weather-location`
+branch (behavior change beyond the bug fix). Expect a small conflict in
+`WeatherManager.swift` when rebasing `rob/local-build` if upstream touches
+the same file.
+
 ## Building
 
 ```
