@@ -198,8 +198,13 @@ branch/merge from `rob/local-build`, and update the table below.
 
 | Fix | Upstream status | Local commit | Still needed |
 | --- | --- | --- | --- |
-| Weather CL delegate | not merged (2026-08-19) | `16c9cba` | yes |
-| Claude usage rate limits | not merged (2026-08-19) | `6301400` | yes |
+| Weather CL delegate | PR #97 open (2026-08-19) | `16c9cba` | yes |
+| Claude usage rate limits | PR #98 open (2026-08-19) | `6301400` | yes |
+| Full-expanded tab strip + adaptive island width | PR #99 open (2026-08-19) | `5b02ef6` | yes |
+| Island collapse loop at top screen edge | PR #100 open (2026-08-19) | `3940d6f` | yes |
+
+Local-only additions (never for upstream): IP geolocation Weather fallback
+(`0d8a5da`), product identity (`SuperIsland Rob`).
 
 ## Known limitations
 
