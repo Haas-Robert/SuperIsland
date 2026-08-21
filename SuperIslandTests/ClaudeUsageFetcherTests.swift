@@ -351,3 +351,56 @@ final class ClaudeUsageFetcherTests: XCTestCase {
         }
     }
 }
+
+final class ClaudeLimitEntriesTests: XCTestCase {
+
+    func testLimitsArrayMapsToLabeledEntries() {
+        let response: [String: Any] = [
+            "limits": [
+                ["kind": "session", "percent": 11, "severity": "normal", "resets_at": "2026-08-21T12:00:00+00:00"],
+                ["kind": "weekly_all", "percent": 24, "resets_at": "2026-08-22T07:00:00+00:00"],
+                ["kind": "weekly_scoped", "percent": 43,
+                 "scope": ["model": ["display_name": "Fable"]]]
+            ]
+        ]
+        let entries = AIUsageProvider.claudeLimitEntries(from: response)
+        XCTAssertEqual(entries.count, 3)
+        XCTAssertEqual(entries[0]["label"] as? String, "5h session")
+        XCTAssertEqual(entries[0]["usedPercent"] as? Double, 11)
+        XCTAssertEqual(entries[1]["label"] as? String, "Week · all models")
+        XCTAssertEqual(entries[2]["label"] as? String, "Week · Fable")
+        XCTAssertEqual(entries[2]["usedPercent"] as? Double, 43)
+    }
+
+    func testMissingLimitsFallBackToUsageWindows() {
+        let response: [String: Any] = [
+            "five_hour": ["utilization": 31.0, "resets_at": "2026-08-21T15:00:00+00:00"],
+            "seven_day": ["utilization": 12.0, "resets_at": "2026-08-22T07:00:00+00:00"]
+        ]
+        let entries = AIUsageProvider.claudeLimitEntries(from: response)
+        XCTAssertEqual(entries.count, 2)
+        XCTAssertEqual(entries[0]["kind"] as? String, "session")
+        XCTAssertEqual(entries[0]["usedPercent"] as? Double, 31.0)
+        XCTAssertEqual(entries[1]["kind"] as? String, "weekly_all")
+    }
+
+    func testExtraUsageConvertsMinorUnits() {
+        let response: [String: Any] = [
+            "spend": [
+                "enabled": true,
+                "used": ["amount_minor": 240, "currency": "USD", "exponent": 2],
+                "limit": ["amount_minor": 5000, "currency": "USD", "exponent": 2]
+            ]
+        ]
+        let extra = AIUsageProvider.claudeExtraUsage(from: response)
+        XCTAssertEqual(extra?["usedAmount"] as? Double, 2.40)
+        XCTAssertEqual(extra?["limitAmount"] as? Double, 50.0)
+    }
+
+    func testExtraUsageNilWhenDisabled() {
+        let response: [String: Any] = [
+            "spend": ["enabled": false, "used": ["amount_minor": 240]]
+        ]
+        XCTAssertNil(AIUsageProvider.claudeExtraUsage(from: response))
+    }
+}

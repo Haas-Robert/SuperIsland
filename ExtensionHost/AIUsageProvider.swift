@@ -292,7 +292,104 @@ enum AIUsageProvider {
         payload["remainingPercent"] = overallRemainingPercent
         payload["weeklyRemainingPercent"] = weeklyRemainingPercent ?? NSNull()
         payload["currentSessionRemainingPercent"] = sessionRemainingPercent
+        payload["limits"] = claudeLimitEntries(from: response)
+        payload["extraUsage"] = claudeExtraUsage(from: response) ?? NSNull()
         return payload
+    }
+
+    /// Maps the server's `limits` array — the same rows the Claude UI shows
+    /// (5-hour limit, Weekly all models, Weekly <model>) — to renderer
+    /// entries with used percent, reset time, and a display label. Falls
+    /// back to the raw usage windows when the array is missing.
+    static func claudeLimitEntries(from response: [String: Any]) -> [[String: Any]] {
+        if let limits = response["limits"] as? [[String: Any]] {
+            let entries: [[String: Any]] = limits.compactMap { limit in
+                guard let kind = limit["kind"] as? String,
+                      let percent = asDoubleOrNil(limit["percent"]) else {
+                    return nil
+                }
+
+                let label: String
+                switch kind {
+                case "session":
+                    label = "5h session"
+                case "weekly_all":
+                    label = "Week · all models"
+                case "weekly_scoped":
+                    var scopeName = "scoped"
+                    if let scope = limit["scope"] as? [String: Any] {
+                        if let model = scope["model"] as? [String: Any],
+                           let name = model["display_name"] as? String {
+                            scopeName = name
+                        } else if let surface = scope["surface"] as? [String: Any],
+                                  let name = surface["display_name"] as? String {
+                            scopeName = name
+                        }
+                    }
+                    label = "Week · \(scopeName)"
+                default:
+                    label = kind
+                }
+
+                var entry: [String: Any] = [
+                    "kind": kind,
+                    "label": label,
+                    "usedPercent": max(0, min(100, percent))
+                ]
+                entry["severity"] = limit["severity"] ?? NSNull()
+                entry["resetsAt"] = limit["resets_at"] ?? NSNull()
+                return entry
+            }
+            if !entries.isEmpty {
+                return entries
+            }
+        }
+
+        var entries: [[String: Any]] = []
+        if let window = response["five_hour"] as? [String: Any],
+           let utilization = asDoubleOrNil(window["utilization"]) {
+            entries.append([
+                "kind": "session",
+                "label": "5h session",
+                "usedPercent": max(0, min(100, utilization)),
+                "resetsAt": window["resets_at"] ?? NSNull(),
+                "severity": NSNull()
+            ])
+        }
+        if let window = response["seven_day"] as? [String: Any],
+           let utilization = asDoubleOrNil(window["utilization"]) {
+            entries.append([
+                "kind": "weekly_all",
+                "label": "Week · all models",
+                "usedPercent": max(0, min(100, utilization)),
+                "resetsAt": window["resets_at"] ?? NSNull(),
+                "severity": NSNull()
+            ])
+        }
+        return entries
+    }
+
+    /// Extra-usage (pay-as-you-go credits) spend in account currency, only
+    /// when the user has it enabled — real money, unlike the plan windows.
+    static func claudeExtraUsage(from response: [String: Any]) -> [String: Any]? {
+        guard let spend = response["spend"] as? [String: Any],
+              (spend["enabled"] as? Bool) == true,
+              let used = spend["used"] as? [String: Any],
+              let usedMinor = asDoubleOrNil(used["amount_minor"]) else {
+            return nil
+        }
+
+        let usedExponent = asDoubleOrNil(used["exponent"]) ?? 2
+        var result: [String: Any] = [
+            "usedAmount": usedMinor / pow(10.0, usedExponent),
+            "currency": used["currency"] as? String ?? "USD"
+        ]
+        if let limit = spend["limit"] as? [String: Any],
+           let limitMinor = asDoubleOrNil(limit["amount_minor"]) {
+            let limitExponent = asDoubleOrNil(limit["exponent"]) ?? 2
+            result["limitAmount"] = limitMinor / pow(10.0, limitExponent)
+        }
+        return result
     }
 
     private static func buildClaudePayloadFromStatsCache(updatedAt: Int) -> [String: Any]? {
