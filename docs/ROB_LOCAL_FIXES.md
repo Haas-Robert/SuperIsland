@@ -206,8 +206,13 @@ branch/merge from `rob/local-build`, and update the table below.
 | Island above menu bar managers (Ice) | PR #101 open (2026-08-19) | `025d710` | yes |
 | Notch side slots + compact notifications | PR #102 open (2026-08-19) | `7a5f203` | yes |
 
+| Agents Status worktree labels + turn runtime | PR #103 open (2026-08-21) | `d429914` | yes |
+
 Local-only additions (never for upstream): IP geolocation Weather fallback
-(`0d8a5da`), product identity (`SuperIsland Rob`).
+(`0d8a5da`), product identity (`SuperIsland Rob`), AI Usage limits view
+(`b069b54` + Codex additional_rate_limits fix — shows the same rows as the
+Claude UI with used %, resets, extra-usage spend, and static plan prices
+editable at the top of Extensions/ai-usage/index.js).
 
 ## Known limitations
 
