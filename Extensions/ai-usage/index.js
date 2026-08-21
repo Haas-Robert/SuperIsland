@@ -3,7 +3,9 @@
 // --- Static plan info (edit to match your subscriptions) ------------------
 var CLAUDE_PLAN_LABEL = "Max 20x";
 var CLAUDE_PLAN_PRICE = "$200/mo";
-var CODEX_PLAN_PRICES = { plus: "$20/mo", pro: "$200/mo", team: "$30/mo", business: "$30/mo" };
+var CODEX_PLAN_PRICES = { plus: "$20/mo", prolite: "$100/mo", pro: "$200/mo", team: "$30/mo", business: "$30/mo" };
+// API plan_type -> display name where they differ (ChatGPT calls "prolite" the "Pro plan").
+var CODEX_PLAN_NAMES = { prolite: "Pro" };
 
 // Percent shown everywhere is USED percent, matching the Claude and ChatGPT
 // UIs (the previous build showed remaining percent, which read as noise).
@@ -192,9 +194,12 @@ function codexModel(usage) {
   var codex = asObject(usage && usage.codex);
   var source = codex && typeof codex.source === "string" ? codex.source : null;
   var planType = codex && typeof codex.planType === "string" ? codex.planType : null;
-  var planLine = planType
-    ? planType.charAt(0).toUpperCase() + planType.slice(1) +
-      (CODEX_PLAN_PRICES[planType.toLowerCase()] ? " · " + CODEX_PLAN_PRICES[planType.toLowerCase()] : "")
+  var planKey = planType ? planType.toLowerCase() : null;
+  var planName = planKey
+    ? (CODEX_PLAN_NAMES[planKey] || planType.charAt(0).toUpperCase() + planType.slice(1))
+    : null;
+  var planLine = planName
+    ? planName + (CODEX_PLAN_PRICES[planKey] ? " · " + CODEX_PLAN_PRICES[planKey] : "")
     : "ChatGPT";
 
   if (!codex || codex.available !== true) {
