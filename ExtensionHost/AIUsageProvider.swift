@@ -132,9 +132,41 @@ enum AIUsageProvider {
             return nil
         }
 
+        // The API has moved windows around over time: today the top-level
+        // rate_limit often carries only the weekly window while the 5-hour
+        // window lives under additional_rate_limits[].rate_limit. Collect
+        // every window we can find, dedupe by window length, and treat the
+        // shortest as the session window and the longest as the weekly one.
         let rateLimit = response["rate_limit"] as? [String: Any]
-        let primary = mapCodexWindow(rateLimit?["primary_window"])
-        let secondary = mapCodexWindow(rateLimit?["secondary_window"])
+        var windowCandidates: [[String: Any]] = []
+        func appendWindow(_ value: Any?) {
+            guard let window = value as? [String: Any],
+                  asDoubleOrNil(window["limit_window_seconds"]) != nil else { return }
+            windowCandidates.append(window)
+        }
+        appendWindow(rateLimit?["primary_window"])
+        appendWindow(rateLimit?["secondary_window"])
+        if let additional = response["additional_rate_limits"] as? [[String: Any]] {
+            for extra in additional {
+                let extraRateLimit = extra["rate_limit"] as? [String: Any]
+                appendWindow(extraRateLimit?["primary_window"])
+                appendWindow(extraRateLimit?["secondary_window"])
+            }
+        }
+
+        var windowsByLength: [Int: [String: Any]] = [:]
+        for window in windowCandidates {
+            let length = Int(asDouble(window["limit_window_seconds"]))
+            if let existing = windowsByLength[length],
+               asDouble(existing["used_percent"]) >= asDouble(window["used_percent"]) {
+                continue
+            }
+            windowsByLength[length] = window
+        }
+        let orderedWindows = windowsByLength.sorted { $0.key < $1.key }.map(\.value)
+
+        let primary = orderedWindows.first.flatMap { mapCodexWindow($0) }
+        let secondary = orderedWindows.count > 1 ? mapCodexWindow(orderedWindows.last) : nil
         let credits = response["credits"] as? [String: Any]
 
         return [
