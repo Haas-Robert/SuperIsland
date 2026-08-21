@@ -1,7 +1,14 @@
 "use strict";
 
-const LOW_THRESHOLD = 25;
-const VERY_LOW_THRESHOLD = 10;
+// --- Static plan info (edit to match your subscriptions) ------------------
+var CLAUDE_PLAN_LABEL = "Max 20x";
+var CLAUDE_PLAN_PRICE = "$200/mo";
+var CODEX_PLAN_PRICES = { plus: "$20/mo", pro: "$200/mo", team: "$30/mo", business: "$30/mo" };
+
+// Percent shown everywhere is USED percent, matching the Claude and ChatGPT
+// UIs (the previous build showed remaining percent, which read as noise).
+var WARN_USED = 75;
+var CRITICAL_USED = 90;
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
@@ -11,7 +18,7 @@ function toNumber(value, fallback) {
   if (value === null || value === undefined || value === "") {
     return fallback;
   }
-  const parsed = Number(value);
+  var parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
@@ -19,19 +26,36 @@ function asObject(value) {
   return value && typeof value === "object" ? value : null;
 }
 
-function colorForRemaining(remainingPercent) {
-  if (remainingPercent <= VERY_LOW_THRESHOLD) return "red";
-  if (remainingPercent <= LOW_THRESHOLD) return "orange";
+function usedColor(usedPercent) {
+  if (usedPercent >= CRITICAL_USED) return "red";
+  if (usedPercent >= WARN_USED) return "orange";
   return "green";
 }
 
 function formatPercent(value) {
-  return `${Math.round(clamp(value, 0, 100))}%`;
+  return Math.round(clamp(value, 0, 100)) + "%";
 }
 
-function percentLabel(value) {
-  if (value === null || value === undefined) return "--%";
-  return `${Math.round(clamp(value, 0, 100))}%`;
+var WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+// Accepts an ISO-8601 string or epoch seconds; "" when unparsable.
+function formatReset(value) {
+  if (value === null || value === undefined || value === "") return "";
+  var date;
+  if (typeof value === "number") {
+    date = new Date(value * 1000);
+  } else {
+    date = new Date(String(value));
+  }
+  if (isNaN(date.getTime())) return "";
+  var hh = date.getHours();
+  var mm = date.getMinutes();
+  var time = hh + ":" + (mm < 10 ? "0" + mm : mm);
+  var now = new Date();
+  var sameDay = date.getFullYear() === now.getFullYear() &&
+    date.getMonth() === now.getMonth() && date.getDate() === now.getDate();
+  if (sameDay) return time;
+  return WEEKDAYS[date.getDay()] + " " + time;
 }
 
 function sourceLabel(source) {
@@ -68,204 +92,187 @@ function sourceLabel(source) {
 }
 
 function withSource(detail, source) {
-  const sourceText = sourceLabel(source);
+  var sourceText = sourceLabel(source);
   if (!sourceText) return detail;
-  return detail ? `${detail} | ${sourceText}` : sourceText;
+  return detail ? detail + " | " + sourceText : sourceText;
 }
 
-function pickCodexWindow(codex) {
-  const primary = asObject(codex.primary);
-  const secondary = asObject(codex.secondary);
+// --- Data models ----------------------------------------------------------
+// Each provider reduces to: { title, planLine, available, rows, maxUsed,
+// color, text, progress, detail, extraLine }
+// where rows = [{ label, used, resetsAt }] with used percent semantics.
 
-  if (!primary && !secondary) return null;
-  if (primary && !secondary) return primary;
-  if (!primary && secondary) return secondary;
+function claudeModel(usage) {
+  var claude = asObject(usage && usage.claude);
+  var source = claude && typeof claude.source === "string" ? claude.source : null;
+  var planLine = CLAUDE_PLAN_LABEL + " · " + CLAUDE_PLAN_PRICE;
 
-  const primaryRemaining = toNumber(primary.remainingPercent, 101);
-  const secondaryRemaining = toNumber(secondary.remainingPercent, 101);
-  return primaryRemaining <= secondaryRemaining ? primary : secondary;
-}
-
-function codexRemainingPercent(codexWindow) {
-  if (!codexWindow) return null;
-
-  const remaining = toNumber(codexWindow.remainingPercent, null);
-  if (remaining !== null) return clamp(remaining, 0, 100);
-
-  const used = toNumber(codexWindow.usedPercent, null);
-  if (used !== null) return clamp(100 - used, 0, 100);
-
-  return null;
-}
-
-function codexUsageStats(codex) {
-  const windows = [];
-  const primary = asObject(codex.primary);
-  const secondary = asObject(codex.secondary);
-
-  [primary, secondary].forEach((window) => {
-    if (!window) return;
-    const remainingPercent = codexRemainingPercent(window);
-    if (remainingPercent === null) return;
-    windows.push({
-      remainingPercent,
-      windowMinutes: toNumber(window.windowMinutes, 0)
-    });
-  });
-
-  if (windows.length === 0) {
-    return { weeklyRemaining: null, sessionRemaining: null };
+  if (!claude || claude.available !== true) {
+    return {
+      title: "Claude",
+      planLine: planLine,
+      available: false,
+      rows: [],
+      maxUsed: 0,
+      color: "gray",
+      text: "--",
+      progress: 0,
+      detail: withSource("Not available", source),
+      extraLine: null
+    };
   }
 
-  windows.sort((a, b) => a.windowMinutes - b.windowMinutes);
-  const session = windows[0];
-  const weekly = windows[windows.length - 1];
+  var rows = [];
+  var limits = Array.isArray(claude.limits) ? claude.limits : [];
+  for (var i = 0; i < limits.length; i++) {
+    var limit = asObject(limits[i]);
+    if (!limit) continue;
+    var used = toNumber(limit.usedPercent, null);
+    if (used === null) continue;
+    rows.push({
+      label: typeof limit.label === "string" ? limit.label : "window",
+      used: clamp(used, 0, 100),
+      resetsAt: limit.resetsAt || null
+    });
+  }
+
+  // Older payloads (local summary, stats cache) carry only remaining percents.
+  if (rows.length === 0) {
+    var sessionRemaining = toNumber(claude.currentSessionRemainingPercent, null);
+    var weeklyRemaining = toNumber(claude.weeklyRemainingPercent, null);
+    if (sessionRemaining !== null) {
+      rows.push({ label: "5h session", used: clamp(100 - sessionRemaining, 0, 100), resetsAt: claude.resetAt || null });
+    }
+    if (weeklyRemaining !== null) {
+      rows.push({ label: "Week", used: clamp(100 - weeklyRemaining, 0, 100), resetsAt: null });
+    }
+  }
+
+  var maxUsed = 0;
+  for (var j = 0; j < rows.length; j++) {
+    if (rows[j].used > maxUsed) maxUsed = rows[j].used;
+  }
+
+  var extraLine = null;
+  var extra = asObject(claude.extraUsage);
+  if (extra) {
+    var usedAmount = toNumber(extra.usedAmount, null);
+    if (usedAmount !== null) {
+      var limitAmount = toNumber(extra.limitAmount, null);
+      extraLine = "Extra usage " + "$" + usedAmount.toFixed(2) +
+        (limitAmount !== null ? " / $" + limitAmount.toFixed(0) : "");
+    }
+  }
+
+  var detail = typeof claude.statusLabel === "string" ? claude.statusLabel : null;
+  if (claude.stale === true && !detail) detail = "Showing cached data";
 
   return {
-    weeklyRemaining: weekly ? Math.round(clamp(weekly.remainingPercent, 0, 100)) : null,
-    sessionRemaining: session ? Math.round(clamp(session.remainingPercent, 0, 100)) : null
+    title: "Claude",
+    planLine: planLine,
+    available: rows.length > 0,
+    rows: rows,
+    maxUsed: maxUsed,
+    color: rows.length > 0 ? usedColor(maxUsed) : "gray",
+    text: rows.length > 0 ? formatPercent(maxUsed) : "--",
+    progress: rows.length > 0 ? maxUsed / 100 : 0,
+    detail: withSource(detail, source),
+    extraLine: extraLine
   };
 }
 
+function codexWindowRowLabel(window) {
+  var minutes = toNumber(window.windowMinutes, 0);
+  if (minutes >= 5000) return "Week";
+  if (window.windowLabel) return String(window.windowLabel) + " session";
+  return "Window";
+}
+
 function codexModel(usage) {
-  const codex = asObject(usage && usage.codex);
-  const source = codex && typeof codex.source === "string" ? codex.source : null;
+  var codex = asObject(usage && usage.codex);
+  var source = codex && typeof codex.source === "string" ? codex.source : null;
+  var planType = codex && typeof codex.planType === "string" ? codex.planType : null;
+  var planLine = planType
+    ? planType.charAt(0).toUpperCase() + planType.slice(1) +
+      (CODEX_PLAN_PRICES[planType.toLowerCase()] ? " · " + CODEX_PLAN_PRICES[planType.toLowerCase()] : "")
+    : "ChatGPT";
+
   if (!codex || codex.available !== true) {
     return {
       title: "Codex",
-      text: "--",
-      remaining: 0,
-      progress: 0,
+      planLine: planLine,
+      available: false,
+      rows: [],
+      maxUsed: 0,
       color: "gray",
-      weeklyRemaining: null,
-      sessionRemaining: null,
-      detail: withSource("Not available", source)
+      text: "--",
+      progress: 0,
+      detail: withSource("Not available", source),
+      extraLine: null
     };
   }
 
   if (codex.unlimited === true) {
     return {
       title: "Codex",
-      text: "∞",
-      remaining: 100,
-      progress: 1,
+      planLine: planLine,
+      available: true,
+      rows: [],
+      maxUsed: 0,
       color: "green",
-      weeklyRemaining: 100,
-      sessionRemaining: 100,
-      detail: withSource("Unlimited", source)
-    };
-  }
-
-  const window = pickCodexWindow(codex);
-  const remaining = codexRemainingPercent(window);
-  const usageStats = codexUsageStats(codex);
-
-  if (remaining === null) {
-    return {
-      title: "Codex",
-      text: "--",
-      remaining: 0,
+      text: "∞",
       progress: 0,
-      color: "gray",
-      weeklyRemaining: usageStats.weeklyRemaining,
-      sessionRemaining: usageStats.sessionRemaining,
-      detail: withSource("No window data", source)
+      detail: withSource("Unlimited", source),
+      extraLine: null
     };
   }
+
+  var rows = [];
+  var windows = [asObject(codex.primary), asObject(codex.secondary)];
+  for (var i = 0; i < windows.length; i++) {
+    var window = windows[i];
+    if (!window) continue;
+    var used = toNumber(window.usedPercent, null);
+    if (used === null) {
+      var remaining = toNumber(window.remainingPercent, null);
+      if (remaining !== null) used = 100 - remaining;
+    }
+    if (used === null) continue;
+    rows.push({
+      label: codexWindowRowLabel(window),
+      used: clamp(used, 0, 100),
+      resetsAt: window.resetsAt !== undefined ? window.resetsAt : null
+    });
+  }
+
+  var maxUsed = 0;
+  for (var j = 0; j < rows.length; j++) {
+    if (rows[j].used > maxUsed) maxUsed = rows[j].used;
+  }
+
+  var extraLine = codex.hasCredits === true ? "Credits available" : null;
 
   return {
     title: "Codex",
-    text: formatPercent(remaining),
-    remaining,
-    progress: remaining / 100,
-    color: colorForRemaining(remaining),
-    weeklyRemaining: usageStats.weeklyRemaining,
-    sessionRemaining: usageStats.sessionRemaining,
-    detail: withSource(window && window.windowLabel ? window.windowLabel : "Usage window", source)
+    planLine: planLine,
+    available: rows.length > 0,
+    rows: rows,
+    maxUsed: maxUsed,
+    color: rows.length > 0 ? usedColor(maxUsed) : "gray",
+    text: rows.length > 0 ? formatPercent(maxUsed) : "--",
+    progress: rows.length > 0 ? maxUsed / 100 : 0,
+    detail: withSource(null, source),
+    extraLine: extraLine
   };
 }
 
-function claudeModel(usage) {
-  const claude = asObject(usage && usage.claude);
-  const source = claude && typeof claude.source === "string" ? claude.source : null;
-  if (!claude || claude.available !== true) {
-    return {
-      title: "Claude",
-      text: "--",
-      remaining: 0,
-      progress: 0,
-      color: "gray",
-      weeklyRemaining: null,
-      sessionRemaining: null,
-      detail: withSource("Not available", source)
-    };
-  }
-
-  const status = typeof claude.status === "string" ? claude.status : "allowed";
-  const statusLabel = typeof claude.statusLabel === "string" ? claude.statusLabel : null;
-  const explicitRemaining = toNumber(claude.remainingPercent, null);
-  const explicitWeeklyRemaining = toNumber(claude.weeklyRemainingPercent, null);
-  const explicitSessionRemaining = toNumber(claude.currentSessionRemainingPercent, null);
-  const hoursTillReset = toNumber(claude.hoursTillReset, null);
-
-  let remaining;
-  let detail;
-
-  if (explicitRemaining !== null) {
-    remaining = clamp(explicitRemaining, 0, 100);
-    detail = statusLabel || "Usage data";
-  } else if (status === "rejected") {
-    remaining = 0;
-    detail = statusLabel || "Blocked";
-  } else if (status === "allowed_warning") {
-    const warningLooksLow = statusLabel && /(low|limit|blocked|exceeded|critical)/i.test(statusLabel);
-    if (warningLooksLow) {
-      remaining = 20;
-      detail = statusLabel || "Low remaining";
-    } else if (hoursTillReset !== null) {
-      if (hoursTillReset <= 1) {
-        remaining = 8;
-      } else if (hoursTillReset <= 3) {
-        remaining = 22;
-      } else {
-        remaining = 55;
-      }
-      detail = statusLabel || `${Math.ceil(hoursTillReset)}h to reset`;
-    } else {
-      remaining = 55;
-      detail = statusLabel || "Warning";
-    }
-  } else if (hoursTillReset !== null) {
-    if (hoursTillReset <= 1) {
-      remaining = 8;
-    } else if (hoursTillReset <= 3) {
-      remaining = 22;
-    } else {
-      remaining = 65;
-    }
-    detail = statusLabel || `${Math.ceil(hoursTillReset)}h to reset`;
-  } else {
-    remaining = 65;
-    detail = statusLabel || "Available";
-  }
-
-  return {
-    title: "Claude",
-    text: formatPercent(remaining),
-    remaining,
-    progress: remaining / 100,
-    color: colorForRemaining(remaining),
-    weeklyRemaining: explicitWeeklyRemaining !== null ? Math.round(clamp(explicitWeeklyRemaining, 0, 100)) : null,
-    sessionRemaining: explicitSessionRemaining !== null ? Math.round(clamp(explicitSessionRemaining, 0, 100)) : null,
-    detail: withSource(detail, source)
-  };
-}
+// --- Shared views ---------------------------------------------------------
 
 function ringWithPercent(model, lineWidth) {
   return View.hstack([
     View.circularProgress(model.progress, {
       total: 1,
-      lineWidth,
+      lineWidth: lineWidth,
       color: model.color
     }),
     View.text(model.text, {
@@ -275,16 +282,69 @@ function ringWithPercent(model, lineWidth) {
   ], { spacing: 5, align: "center" });
 }
 
+function limitRow(row) {
+  var reset = formatReset(row.resetsAt);
+  var children = [
+    View.frame(
+      View.text(row.label, { style: "footnote", color: "gray", lineLimit: 1 }),
+      { width: 96, alignment: "leading" }
+    ),
+    View.frame(
+      View.progress(row.used, { total: 100, color: usedColor(row.used) }),
+      { width: 72, alignment: "center" }
+    ),
+    View.frame(
+      View.text(formatPercent(row.used), { style: "monospacedSmall", color: usedColor(row.used) }),
+      { width: 38, alignment: "trailing" }
+    )
+  ];
+  if (reset) {
+    children.push(View.text(reset, { style: "footnote", color: "gray" }));
+  }
+  return View.hstack(children, { spacing: 6, align: "center" });
+}
+
+function providerColumn(model) {
+  var children = [
+    View.hstack([
+      View.text(model.title, { style: "headline", color: "white" }),
+      View.text(model.planLine, { style: "footnote", color: "gray" })
+    ], { spacing: 6, align: "center" })
+  ];
+
+  if (model.rows.length > 0) {
+    for (var i = 0; i < model.rows.length; i++) {
+      children.push(limitRow(model.rows[i]));
+    }
+  } else {
+    children.push(View.text(model.text === "∞" ? "Unlimited" : "No data", {
+      style: "caption",
+      color: "gray"
+    }));
+  }
+
+  if (model.extraLine) {
+    children.push(View.text(model.extraLine, { style: "footnote", color: "gray" }));
+  }
+  if (model.detail) {
+    children.push(View.text(model.detail, { style: "footnote", color: "gray", lineLimit: 1 }));
+  }
+
+  return View.vstack(children, { spacing: 5, align: "leading" });
+}
+
 function usageSnapshot() {
-  const usage = SuperIsland.system.getAIUsage();
+  var usage = SuperIsland.system.getAIUsage();
   return usage && typeof usage === "object" ? usage : null;
 }
 
+// --- Module ---------------------------------------------------------------
+
 SuperIsland.registerModule({
   compact() {
-    const usage = usageSnapshot();
-    const codex = codexModel(usage);
-    const claude = claudeModel(usage);
+    var usage = usageSnapshot();
+    var codex = codexModel(usage);
+    var claude = claudeModel(usage);
 
     return View.hstack([
       ringWithPercent(codex, 2.5),
@@ -295,8 +355,8 @@ SuperIsland.registerModule({
 
   minimalCompact: {
     leading() {
-      const usage = usageSnapshot();
-      const codex = codexModel(usage);
+      var usage = usageSnapshot();
+      var codex = codexModel(usage);
       return View.circularProgress(codex.progress, {
         total: 1,
         lineWidth: 3,
@@ -305,8 +365,8 @@ SuperIsland.registerModule({
     },
 
     trailing() {
-      const usage = usageSnapshot();
-      const claude = claudeModel(usage);
+      var usage = usageSnapshot();
+      var claude = claudeModel(usage);
       return View.frame(
         View.circularProgress(claude.progress, {
           total: 1,
@@ -319,52 +379,33 @@ SuperIsland.registerModule({
   },
 
   expanded() {
-    const usage = usageSnapshot();
-    const codex = codexModel(usage);
-    const claude = claudeModel(usage);
+    var usage = usageSnapshot();
+    var codex = codexModel(usage);
+    var claude = claudeModel(usage);
 
     return View.hstack([
       View.vstack([
         View.text("Codex", { style: "caption", color: "gray" }),
-        View.hstack([
-          View.circularProgress(codex.progress, { total: 1, lineWidth: 4, color: codex.color }),
-          View.text(codex.text, { style: "monospaced", color: codex.color })
-        ], { spacing: 8, align: "center" })
+        ringWithPercent(codex, 4)
       ], { spacing: 4, align: "center" }),
-
       View.vstack([
         View.text("Claude", { style: "caption", color: "gray" }),
-        View.hstack([
-          View.circularProgress(claude.progress, { total: 1, lineWidth: 4, color: claude.color }),
-          View.text(claude.text, { style: "monospaced", color: claude.color })
-        ], { spacing: 8, align: "center" })
+        ringWithPercent(claude, 4)
       ], { spacing: 4, align: "center" })
     ], { spacing: 12, align: "center", distribution: "fillEqually" });
   },
 
   fullExpanded() {
-    const usage = usageSnapshot();
-    const codex = codexModel(usage);
-    const claude = claudeModel(usage);
+    var usage = usageSnapshot();
+    var codex = codexModel(usage);
+    var claude = claudeModel(usage);
 
     return View.vstack([
       View.text("AI Usage", { style: "title", color: "white" }),
       View.hstack([
-        View.vstack([
-          View.circularProgress(codex.progress, { total: 1, lineWidth: 6, color: codex.color }),
-          View.text("Codex", { style: "caption", color: "gray" }),
-          View.text(codex.text, { style: "monospaced", color: codex.color }),
-          View.text(`Week ${percentLabel(codex.weeklyRemaining)}`, { style: "footnote", color: "gray" }),
-          View.text(`Session ${percentLabel(codex.sessionRemaining)}`, { style: "footnote", color: "gray" })
-        ], { spacing: 4, align: "center" }),
-        View.vstack([
-          View.circularProgress(claude.progress, { total: 1, lineWidth: 6, color: claude.color }),
-          View.text("Claude", { style: "caption", color: "gray" }),
-          View.text(claude.text, { style: "monospaced", color: claude.color }),
-          View.text(`Week ${percentLabel(claude.weeklyRemaining)}`, { style: "footnote", color: "gray" }),
-          View.text(`Session ${percentLabel(claude.sessionRemaining)}`, { style: "footnote", color: "gray" })
-        ], { spacing: 4, align: "center" })
-      ], { spacing: 20, align: "center", distribution: "fillEqually" })
-    ], { spacing: 10, align: "center" });
+        providerColumn(claude),
+        providerColumn(codex)
+      ], { spacing: 24, align: "top", distribution: "fillEqually" })
+    ], { spacing: 10, align: "leading" });
   }
 });
