@@ -101,6 +101,23 @@ final class ClaudeUsageFetcher {
         self.buildPayload = buildPayload
     }
 
+    /// Called after every successful fetch with the fresh payload, so the
+    /// owner can persist it (the in-memory copy dies with the process, and
+    /// an app started while the token is expired would otherwise have no
+    /// stale data to show).
+    var onPayloadStored: (([String: Any]) -> Void)?
+
+    /// Seeds the last-good payload (typically from persistence) without
+    /// overwriting anything fetched in this process.
+    func seedLastGoodPayload(_ payload: [String: Any]?) {
+        guard let payload else { return }
+        lock.lock()
+        if _lastGoodPayload == nil {
+            _lastGoodPayload = payload
+        }
+        lock.unlock()
+    }
+
     var nextAllowedFetchAt: Date? {
         lock.lock(); defer { lock.unlock() }
         return _nextAllowedFetchAt
@@ -155,6 +172,7 @@ final class ClaudeUsageFetcher {
             _lastFailure = nil
             _nextAllowedFetchAt = nil
             lock.unlock()
+            onPayloadStored?(payload)
             log("claude usage source=oauth-api status=\(status)")
             return payload
 
@@ -243,7 +261,14 @@ final class ClaudeUsageFetcher {
         guard var payload = lastGood else { return nil }
         payload["stale"] = true
         payload["source"] = "oauth-api-stale"
-        payload["statusLabel"] = "\(reason.label) — showing cached data"
+        if let fetchedAt = payload["updatedAt"] as? Int {
+            let formatter = DateFormatter()
+            formatter.dateFormat = "HH:mm"
+            let time = formatter.string(from: Date(timeIntervalSince1970: TimeInterval(fetchedAt)))
+            payload["statusLabel"] = "\(reason.label) — data from \(time)"
+        } else {
+            payload["statusLabel"] = "\(reason.label) — showing cached data"
+        }
         return payload
     }
 

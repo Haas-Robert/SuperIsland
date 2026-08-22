@@ -22,13 +22,40 @@ enum AIUsageProvider {
     private static let claudeTokenLock = NSLock()
     private static var cachedClaudeKeychainToken: ClaudeUsageFetcher.Token?
 
-    static let claudeFetcher = ClaudeUsageFetcher(
-        userAgent: { ClaudeCodeVersionDetector.userAgent() },
-        loadToken: { loadClaudeToken(ignoringCache: $0) },
-        invalidateCachedToken: { invalidateCachedClaudeToken() },
-        httpFetch: { performHTTPJSONRequest($0, timeout: 3.0) },
-        buildPayload: { claudeOAuthResponsePayload(from: $0, updatedAt: $1) }
-    )
+    private static let claudePersistedPayloadDefaultsKey = "aiUsage.claude.lastGoodPayload"
+
+    static let claudeFetcher: ClaudeUsageFetcher = {
+        let fetcher = ClaudeUsageFetcher(
+            userAgent: { ClaudeCodeVersionDetector.userAgent() },
+            loadToken: { loadClaudeToken(ignoringCache: $0) },
+            invalidateCachedToken: { invalidateCachedClaudeToken() },
+            httpFetch: { performHTTPJSONRequest($0, timeout: 3.0) },
+            buildPayload: { claudeOAuthResponsePayload(from: $0, updatedAt: $1) }
+        )
+        // Survive restarts: an app launched while the Claude token is expired
+        // (Claude Code refreshes it only when it runs) can still show the last
+        // known percentages marked stale instead of "No data". The payload
+        // holds only labels and percentages — never tokens.
+        fetcher.seedLastGoodPayload(loadPersistedClaudePayload())
+        fetcher.onPayloadStored = { persistClaudePayload($0) }
+        return fetcher
+    }()
+
+    private static func persistClaudePayload(_ payload: [String: Any]) {
+        guard JSONSerialization.isValidJSONObject(payload),
+              let data = try? JSONSerialization.data(withJSONObject: payload) else {
+            return
+        }
+        UserDefaults.standard.set(data, forKey: claudePersistedPayloadDefaultsKey)
+    }
+
+    private static func loadPersistedClaudePayload() -> [String: Any]? {
+        guard let data = UserDefaults.standard.data(forKey: claudePersistedPayloadDefaultsKey),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return nil
+        }
+        return object
+    }
 
     private enum ClaudeKeychainAccessState: String {
         case unknown
