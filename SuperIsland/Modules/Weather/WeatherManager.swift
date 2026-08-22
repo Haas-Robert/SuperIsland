@@ -43,14 +43,6 @@ final class WeatherManager: NSObject, ObservableObject {
     private var lastFetchTime: Date?
     private var refreshToken: ModuleRefreshToken?
 
-    // IP geolocation fallback (rob/local-build): Macs have no GPS and rely on
-    // Wi-Fi AP triangulation, which fails entirely on a personal hotspot.
-    // When Core Location can't produce a fix, fall back to coarse IP-based
-    // coordinates. A real fix always wins and immediately replaces IP data.
-    private var hasPreciseFix = false
-    private var lastFetchWasApproximate = false
-    private var ipFallbackAttemptedAt: Date?
-
     override private init() {
         super.init()
         locationManager.delegate = self
@@ -65,74 +57,24 @@ final class WeatherManager: NSObject, ObservableObject {
         switch locationManager.authorizationStatus {
         case .authorizedAlways, .authorizedWhenInUse, .authorized:
             locationManager.startUpdatingLocation()
-            scheduleIPFallback()
         case .notDetermined:
             locationManager.requestAlwaysAuthorization()
             // locationManagerDidChangeAuthorization will call startUpdatingLocation() once granted
         default:
-            // Denied/restricted — approximate IP location is the only option.
-            fetchWeatherFromIPLocation()
+            break
         }
-    }
-
-    /// Gives Core Location a head start; only if no fix has ever arrived do we
-    /// fall back to IP-based coordinates.
-    private func scheduleIPFallback() {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 15) { [weak self] in
-            guard let self, !self.hasPreciseFix else { return }
-            self.fetchWeatherFromIPLocation()
-        }
-    }
-
-    private func fetchWeatherFromIPLocation() {
-        guard !hasPreciseFix else { return }
-        if let attempted = ipFallbackAttemptedAt, Date().timeIntervalSince(attempted) < 300 {
-            return
-        }
-        ipFallbackAttemptedAt = Date()
-
-        guard let url = URL(string: "https://get.geojs.io/v1/ip/geo.json") else { return }
-        var request = URLRequest(url: url)
-        request.timeoutInterval = 10
-
-        URLSession.shared.dataTask(with: request) { [weak self] data, _, error in
-            guard let self else { return }
-            guard let data, error == nil,
-                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let latitude = Self.coordinate(json["latitude"]),
-                  let longitude = Self.coordinate(json["longitude"]) else {
-                NSLog("SuperIsland: IP geolocation fallback failed — \(error?.localizedDescription ?? "invalid response")")
-                return
-            }
-            NSLog("SuperIsland: weather using IP-based location (approximate)")
-            DispatchQueue.main.async {
-                guard !self.hasPreciseFix else { return }
-                self.fetchWeather(latitude: latitude, longitude: longitude, approximate: true)
-            }
-        }.resume()
-    }
-
-    // geojs.io returns coordinates as strings.
-    private static func coordinate(_ value: Any?) -> Double? {
-        if let value = value as? Double { return value }
-        if let value = value as? String { return Double(value) }
-        if let value = value as? NSNumber { return value.doubleValue }
-        return nil
     }
 
     // MARK: - Fetching (Open-Meteo free API)
 
-    func fetchWeather(latitude: Double, longitude: Double, approximate: Bool = false) {
+    func fetchWeather(latitude: Double, longitude: Double) {
         guard !isLoading else { return }
 
-        // Debounce: don't fetch more than once per 5 minutes — except when a
-        // precise fix arrives after an approximate (IP-based) fetch.
-        let upgradingToPrecise = !approximate && lastFetchWasApproximate
-        if !upgradingToPrecise, let lastFetch = lastFetchTime, Date().timeIntervalSince(lastFetch) < 300 {
+        // Debounce: don't fetch more than once per 5 minutes
+        if let lastFetch = lastFetchTime, Date().timeIntervalSince(lastFetch) < 300 {
             return
         }
 
-        lastFetchWasApproximate = approximate
         isLoading = true
 
         let urlString = "https://api.open-meteo.com/v1/forecast?latitude=\(latitude)&longitude=\(longitude)&current=temperature_2m,apparent_temperature,relative_humidity_2m,wind_speed_10m,weather_code&hourly=temperature_2m,weather_code&daily=temperature_2m_max,temperature_2m_min,uv_index_max,weather_code&wind_speed_unit=mph&timezone=auto&forecast_days=7"
@@ -181,12 +123,12 @@ final class WeatherManager: NSObject, ObservableObject {
             }.resume()
         }
 
-        // Reverse geocode for location name; "~" marks an IP-based estimate.
+        // Reverse geocode for location name
         let location = CLLocation(latitude: latitude, longitude: longitude)
         CLGeocoder().reverseGeocodeLocation(location) { [weak self] placemarks, _ in
             if let city = placemarks?.first?.locality {
                 DispatchQueue.main.async {
-                    self?.weather.locationName = approximate ? "~\(city)" : city
+                    self?.weather.locationName = city
                 }
             }
         }
@@ -360,12 +302,10 @@ extension WeatherManager: CLLocationManagerDelegate {
     func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
         guard let location = locations.last else { return }
         manager.stopUpdatingLocation()
-        hasPreciseFix = true
         fetchWeather(latitude: location.coordinate.latitude, longitude: location.coordinate.longitude)
     }
 
     func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
         NSLog("SuperIsland: location error — \(error.localizedDescription), status=\(locationManager.authorizationStatus.rawValue)")
-        fetchWeatherFromIPLocation()
     }
 }
