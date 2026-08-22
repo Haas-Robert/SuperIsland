@@ -404,3 +404,80 @@ final class ClaudeLimitEntriesTests: XCTestCase {
         XCTAssertNil(AIUsageProvider.claudeExtraUsage(from: response))
     }
 }
+
+final class ClaudePayloadPersistenceTests: XCTestCase {
+
+    private func makeFetcher(
+        token: ClaudeUsageFetcher.Token?,
+        results: [HTTPJSONResult] = []
+    ) -> (ClaudeUsageFetcher, stored: () -> [[String: Any]]) {
+        var remainingResults = results
+        var remainingTokens = [token]
+        var storedPayloads: [[String: Any]] = []
+        let fetcher = ClaudeUsageFetcher(
+            userAgent: { "claude-code/2.1.220" },
+            loadToken: { _ in remainingTokens.isEmpty ? nil : remainingTokens.removeFirst() },
+            invalidateCachedToken: {},
+            httpFetch: { _ in
+                remainingResults.isEmpty
+                    ? HTTPJSONResult(statusCode: nil, headers: [:], json: nil, error: URLError(.timedOut))
+                    : remainingResults.removeFirst()
+            },
+            buildPayload: { AIUsageProvider.claudeOAuthResponsePayload(from: $0, updatedAt: $1) }
+        )
+        fetcher.log = { _ in }
+        fetcher.onPayloadStored = { storedPayloads.append($0) }
+        return (fetcher, { storedPayloads })
+    }
+
+    func testSuccessNotifiesStoredPayload() throws {
+        let (fetcher, stored) = makeFetcher(
+            token: ClaudeUsageFetcher.Token(value: "t", expiresAt: nil),
+            results: [HTTPJSONResult(
+                statusCode: 200,
+                headers: [:],
+                json: ["five_hour": ["utilization": 20.0]],
+                error: nil
+            )]
+        )
+        _ = try XCTUnwrap(fetcher.payload(updatedAt: 1))
+        XCTAssertEqual(stored().count, 1)
+        XCTAssertEqual(stored().first?["available"] as? Bool, true)
+    }
+
+    func testSeededPayloadServesStaleWhenTokenMissing() throws {
+        // No token at all — without a seed this falls through to nil.
+        let (fetcher, _) = makeFetcher(token: nil)
+        fetcher.seedLastGoodPayload([
+            "available": true,
+            "remainingPercent": 55.0,
+            "updatedAt": 1_700_000_000
+        ])
+
+        let payload = try XCTUnwrap(fetcher.payload(updatedAt: 2))
+        XCTAssertEqual(payload["stale"] as? Bool, true)
+        XCTAssertEqual(payload["source"] as? String, "oauth-api-stale")
+        XCTAssertEqual(payload["remainingPercent"] as? Double, 55.0)
+        let label = try XCTUnwrap(payload["statusLabel"] as? String)
+        XCTAssertTrue(label.contains("data from"), "label should carry the data age: \(label)")
+    }
+
+    func testSeedDoesNotOverwriteFreshPayload() throws {
+        let (fetcher, _) = makeFetcher(
+            token: ClaudeUsageFetcher.Token(value: "t", expiresAt: nil),
+            results: [HTTPJSONResult(
+                statusCode: 200,
+                headers: [:],
+                json: ["five_hour": ["utilization": 20.0]],
+                error: nil
+            )]
+        )
+        _ = try XCTUnwrap(fetcher.payload(updatedAt: 1))
+        fetcher.seedLastGoodPayload(["available": true, "remainingPercent": 1.0])
+
+        // Next call has no token and no results — must serve the FRESH stale
+        // payload (80 % remaining), not the seed.
+        let payload = try XCTUnwrap(fetcher.payload(updatedAt: 2))
+        XCTAssertEqual(payload["currentSessionRemainingPercent"] as? Double, 80.0)
+    }
+}
