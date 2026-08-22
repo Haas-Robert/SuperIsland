@@ -206,6 +206,7 @@ branch/merge from `rob/local-build`, and update the table below.
 | Island above menu bar managers (Ice) | PR #101 open (2026-08-19) | `025d710` | yes |
 | Notch side slots + compact notifications | PR #102 open (2026-08-19) | `7a5f203` | yes |
 | Agents Status worktree labels + turn runtime | PR #103 open (2026-08-21) | `d429914` | yes |
+| Weather multi-day forecast | PR #104 open (2026-08-22) | `feat/weather-forecast` | yes |
 
 Local-only additions (never for upstream): IP geolocation Weather fallback
 (`0d8a5da`), product identity (`SuperIsland Rob`), AI Usage limits view
