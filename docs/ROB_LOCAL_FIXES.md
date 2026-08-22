@@ -211,7 +211,8 @@ branch/merge from `rob/local-build`, and update the table below.
 Local-only additions (never for upstream): IP geolocation Weather fallback
 (`0d8a5da`), product identity (`SuperIsland Rob`), AI Usage limits view
 (`b069b54`, `de2595e` Codex windows from additional_rate_limits, `7cf6046`
-ChatGPT Pro plan price) — shows the same rows as the Claude UI with used %,
+ChatGPT Pro plan price, `7732aeb` payload persistence — last good
+Claude data survives app restarts and stale labels carry the data age) — shows the same rows as the Claude UI with used %,
 resets, extra-usage spend, and static plan labels/prices editable at the
 top of Extensions/ai-usage/index.js (Claude "Max 20x · $200/mo", Codex
 plan_type "prolite" -> "Pro · $100/mo"). All verified in the installed
