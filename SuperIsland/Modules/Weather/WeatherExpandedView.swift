@@ -11,6 +11,14 @@ struct WeatherExpandedView: View {
         }
     }
 
+    // Degree-only variant so a daily high/low pair fits a forecast cell.
+    private func shortTemp(_ celsius: Double) -> String {
+        switch appState.temperatureUnit {
+        case .celsius:    return "\(Int(celsius.rounded()))°"
+        case .fahrenheit: return "\(Int((celsius * 9 / 5 + 32).rounded()))°"
+        }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             // Current weather
@@ -53,8 +61,8 @@ struct WeatherExpandedView: View {
 
                 // Hourly forecast + details side by side
                 HStack(alignment: .top, spacing: 0) {
-                    // Hourly forecast (left)
-                    if !manager.weather.hourlyForecast.isEmpty {
+                    // Hourly forecast + upcoming days share one scrollable strip
+                    if !manager.weather.hourlyForecast.isEmpty || !manager.weather.dailyForecast.isEmpty {
                         ScrollView(.horizontal, showsIndicators: false) {
                             HStack(spacing: 16) {
                                 ForEach(manager.weather.hourlyForecast) { hour in
@@ -70,6 +78,33 @@ struct WeatherExpandedView: View {
                                         Text(temp(hour.temperature))
                                             .font(.system(size: 11, weight: .medium))
                                             .foregroundColor(.white)
+                                    }
+                                }
+
+                                if !manager.weather.hourlyForecast.isEmpty && !manager.weather.dailyForecast.isEmpty {
+                                    Rectangle()
+                                        .fill(.white.opacity(0.18))
+                                        .frame(width: 1, height: 34)
+                                }
+
+                                ForEach(manager.weather.dailyForecast) { day in
+                                    VStack(spacing: 4) {
+                                        Text(day.dayLabel)
+                                            .font(.system(size: 10))
+                                            .foregroundColor(.white.opacity(0.6))
+
+                                        Image(systemName: day.conditionIcon)
+                                            .font(.system(size: 14))
+                                            .foregroundColor(.white)
+
+                                        HStack(spacing: 3) {
+                                            Text(shortTemp(day.high))
+                                                .font(.system(size: 11, weight: .medium))
+                                                .foregroundColor(.white)
+                                            Text(shortTemp(day.low))
+                                                .font(.system(size: 11))
+                                                .foregroundColor(.white.opacity(0.5))
+                                        }
                                     }
                                 }
                             }
