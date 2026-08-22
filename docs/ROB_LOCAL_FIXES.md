@@ -205,7 +205,7 @@ branch/merge from `rob/local-build`, and update the table below.
 | Tab icon contrast + hover/selected states | part of PR #99 (2026-08-19) | `4bcece2` | yes |
 | Island above menu bar managers (Ice) | PR #101 open (2026-08-19) | `025d710` | yes |
 | Notch side slots + compact notifications | PR #102 open (2026-08-19) | `7a5f203` | yes |
-| Agents Status worktree labels + turn runtime | PR #103 open (2026-08-21) | `d429914` | yes |
+| Agents Status worktree labels + turn runtime + session persistence | PR #103 open (2026-08-21, extended 2026-08-22) | `d429914`, `025f008` | yes |
 | Weather multi-day forecast | PR #104 open (2026-08-22) | `feat/weather-forecast` | yes |
 
 Local-only additions (never for upstream): IP geolocation Weather fallback
