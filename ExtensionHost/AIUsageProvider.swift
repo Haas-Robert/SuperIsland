@@ -9,6 +9,8 @@ enum AIUsageProvider {
     private static let claudeKeychainAccessStateDefaultsKey = "aiUsage.claude.keychainAccessState"
     private static let claudeKeychainAccessDeniedAtDefaultsKey = "aiUsage.claude.keychainAccessDeniedAt"
     private static let claudeKeychainPromptedDefaultsKey = "aiUsage.claude.keychainPrompted"
+    private static let claudeKeychainPromptedAtDefaultsKey = "aiUsage.claude.keychainPromptedAt"
+    private static let claudeKeychainPromptCooldown: TimeInterval = 24 * 60 * 60
     private static let claudeKeychainAccessRetryInterval: TimeInterval = 24 * 60 * 60
     private static var cachedSnapshot: [String: Any]?
     private static var cachedAt: Date?
@@ -875,6 +877,14 @@ enum AIUsageProvider {
             kSecMatchLimit as String: kSecMatchLimitOne
         ]
         query[kSecUseAuthenticationContext as String] = context
+        if !allowUserInteraction {
+            // LAContext.interactionNotAllowed suppresses LocalAuthentication
+            // UI, but NOT the classic securityd ACL password dialog — without
+            // this flag every background read of an item we lost the ACL
+            // grant for (Claude Code occasionally recreates the item, which
+            // drops the "Always Allow" entry) pops the password prompt.
+            query[kSecUseAuthenticationUI as String] = kSecUseAuthenticationUIFail
+        }
 
         var result: CFTypeRef?
         let status = SecItemCopyMatching(query as CFDictionary, &result)
@@ -912,14 +922,25 @@ enum AIUsageProvider {
         guard claudeKeychainAccessState() != .denied else {
             return false
         }
-        return !UserDefaults.standard.bool(forKey: claudeKeychainPromptedDefaultsKey)
+        // At most one interactive prompt per day. "Always Allow" normally
+        // sticks, but Claude Code occasionally recreates the keychain item
+        // and the ACL grant is lost with it — without a cooldown the app
+        // would either prompt on every background refresh or, with a
+        // once-forever flag, never be able to recover access at all.
+        if let promptedAt = UserDefaults.standard.object(forKey: claudeKeychainPromptedAtDefaultsKey) as? Date {
+            return Date().timeIntervalSince(promptedAt) > claudeKeychainPromptCooldown
+        }
+        // Migrate from the legacy once-forever flag: treat it as an unknown
+        // prompt time and allow one prompt now.
+        return true
         #else
         return false
         #endif
     }
 
     private static func setClaudeKeychainPrompted() {
-        UserDefaults.standard.set(true, forKey: claudeKeychainPromptedDefaultsKey)
+        UserDefaults.standard.set(Date(), forKey: claudeKeychainPromptedAtDefaultsKey)
+        UserDefaults.standard.removeObject(forKey: claudeKeychainPromptedDefaultsKey)
     }
 
     private static func claudeKeychainAccessState() -> ClaudeKeychainAccessState {
