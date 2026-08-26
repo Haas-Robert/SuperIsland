@@ -199,7 +199,7 @@ branch/merge from `rob/local-build`, and update the table below.
 | Fix | Upstream status | Local commit | Still needed |
 | --- | --- | --- | --- |
 | Weather CL delegate | PR #97 open (2026-08-19) | `16c9cba` | yes |
-| Claude usage rate limits | PR #98 open (2026-08-19) | `6301400` | yes |
+| Claude usage rate limits + keychain prompt fix | PR #98 open (2026-08-19, extended 2026-08-26) | `6301400`, `163e36e` | yes |
 | Full-expanded tab strip + adaptive island width | PR #99 open (2026-08-19) | `5b02ef6` | yes |
 | Island collapse loop at top screen edge | PR #100 open (2026-08-19) | `3940d6f` | yes |
 | Tab icon contrast + hover/selected states | part of PR #99 (2026-08-19) | `4bcece2` | yes |
