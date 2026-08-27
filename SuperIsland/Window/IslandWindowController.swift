@@ -205,6 +205,12 @@ final class IslandWindowController {
     private func setupDidChangeStateHook() {
         appState.didChangeState = { [weak self] oldState, newState in
             guard let self else { return }
+            // Raise the island above menu bar manager bars only while it is
+            // expanded; the compact pill stays at .statusBar (see applyLevel).
+            let expanded = newState != .compact
+            for panel in self.panels.values {
+                panel.applyLevel(forExpanded: expanded)
+            }
             let oldSize = self.appState.windowSize(for: oldState)
             let newSize = self.appState.windowSize(for: newState)
 
