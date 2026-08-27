@@ -15,7 +15,10 @@ enum Constants {
     static let expandedShadowBottomPadding: CGFloat = 40
     static let expandedNotchHeightBoost: CGFloat = 5
     static let compactNotchHorizontalInset: CGFloat = 1
-    static let compactNotchHeightInset: CGFloat = -4
+    // rob/local-build: -1 instead of upstream's -4 — the compact pill then
+    // measures notch height + 1 pt (33 pt here), exactly the menu bar
+    // height, instead of dipping 4 pt below the bar line.
+    static let compactNotchHeightInset: CGFloat = -1
     static let compactNotchBottomCornerRadius: CGFloat = 12
     static let compactNotchMinimumWidth: CGFloat = 168
     static let compactNotchMinimumHeight: CGFloat = 32
