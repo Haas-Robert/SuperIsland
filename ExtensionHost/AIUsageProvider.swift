@@ -886,8 +886,20 @@ enum AIUsageProvider {
             query[kSecUseAuthenticationUI as String] = kSecUseAuthenticationUIFail
         }
 
+        // kSecUseAuthenticationUI only governs data-protection keychain items.
+        // "Claude Code-credentials" lives in the legacy file-based login
+        // keychain, whose ACL password dialog ignores it — the deprecated
+        // process-global switch is the only way to keep a background read
+        // from prompting. Restore it immediately so an interactive attempt
+        // (at most one per day) can still show the dialog.
+        if !allowUserInteraction {
+            SecKeychainSetUserInteractionAllowed(false)
+        }
         var result: CFTypeRef?
         let status = SecItemCopyMatching(query as CFDictionary, &result)
+        if !allowUserInteraction {
+            SecKeychainSetUserInteractionAllowed(true)
+        }
         updateClaudeKeychainAccessState(for: status)
         guard status == errSecSuccess, let data = result as? Data else {
             return nil
