@@ -11,7 +11,9 @@ enum AIUsageProvider {
     private static let claudeKeychainPromptedDefaultsKey = "aiUsage.claude.keychainPrompted"
     private static let claudeKeychainPromptedAtDefaultsKey = "aiUsage.claude.keychainPromptedAt"
     private static let claudeKeychainPromptCooldown: TimeInterval = 24 * 60 * 60
-    private static let claudeKeychainAccessRetryInterval: TimeInterval = 24 * 60 * 60
+    /// Opt-in (off by default): send Claude Code's User-Agent instead of this
+    /// app's own. See claudeUsageUserAgent().
+    private static let claudeCodeUserAgentDefaultsKey = "aiUsage.claude.useClaudeCodeUserAgent"
     private static var cachedSnapshot: [String: Any]?
     private static var cachedAt: Date?
     private static let cacheLock = NSLock()
@@ -26,9 +28,26 @@ enum AIUsageProvider {
 
     private static let claudePersistedPayloadDefaultsKey = "aiUsage.claude.lastGoodPayload"
 
+    /// The usage endpoint puts unknown agents in a much stricter rate-limit
+    /// bucket than Claude Code's own, so identifying honestly costs data:
+    /// expect frequent 429s and mostly cached numbers. Claiming to be Claude
+    /// Code buys accuracy, but it is the user's OAuth account that carries
+    /// the abuse-detection and terms risk, and it breaks the moment the
+    /// endpoint tightens the check — so it is never the default. Users who
+    /// accept that trade opt in explicitly:
+    ///
+    ///     defaults write <bundle-id> aiUsage.claude.useClaudeCodeUserAgent -bool YES
+    static func claudeUsageUserAgent() -> String {
+        if UserDefaults.standard.bool(forKey: claudeCodeUserAgentDefaultsKey) {
+            return ClaudeCodeVersionDetector.userAgent()
+        }
+        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
+        return "SuperIsland/\(version)"
+    }
+
     static let claudeFetcher: ClaudeUsageFetcher = {
         let fetcher = ClaudeUsageFetcher(
-            userAgent: { ClaudeCodeVersionDetector.userAgent() },
+            userAgent: { claudeUsageUserAgent() },
             loadToken: { loadClaudeToken(ignoringCache: $0) },
             invalidateCachedToken: { invalidateCachedClaudeToken() },
             httpFetch: { performHTTPJSONRequest($0, timeout: 3.0) },
@@ -931,19 +950,25 @@ enum AIUsageProvider {
 
     private static func shouldPromptForClaudeKeychainAccess() -> Bool {
         #if os(macOS)
+        // Someone who refused access is never asked again by the app.
         guard claudeKeychainAccessState() != .denied else {
             return false
         }
-        // At most one interactive prompt per day. "Always Allow" normally
-        // sticks, but Claude Code occasionally recreates the keychain item
-        // and the ACL grant is lost with it — without a cooldown the app
-        // would either prompt on every background refresh or, with a
-        // once-forever flag, never be able to recover access at all.
         if let promptedAt = UserDefaults.standard.object(forKey: claudeKeychainPromptedAtDefaultsKey) as? Date {
+            // Not a denial, so this is the "ACL grant lost" case: Claude Code
+            // occasionally recreates the keychain item, which drops the
+            // "Always Allow" entry. One retry per day recovers from that
+            // without turning into a daily nag.
             return Date().timeIntervalSince(promptedAt) > claudeKeychainPromptCooldown
         }
-        // Migrate from the legacy once-forever flag: treat it as an unknown
-        // prompt time and allow one prompt now.
+        if UserDefaults.standard.bool(forKey: claudeKeychainPromptedDefaultsKey) {
+            // Upgrading from the legacy once-forever flag: record when we
+            // adopted it instead of prompting straight away, so an existing
+            // user is not re-prompted just because the app updated.
+            UserDefaults.standard.set(Date(), forKey: claudeKeychainPromptedAtDefaultsKey)
+            UserDefaults.standard.removeObject(forKey: claudeKeychainPromptedDefaultsKey)
+            return false
+        }
         return true
         #else
         return false
@@ -961,18 +986,10 @@ enum AIUsageProvider {
             return .unknown
         }
 
-        guard state == .denied else {
-            return state
-        }
-
-        guard let deniedAt = claudeKeychainAccessDeniedAt(),
-              Date().timeIntervalSince(deniedAt) < claudeKeychainAccessRetryInterval else {
-            // A stale denial should not suppress the prompt forever. If we do not
-            // know when the user last denied, let the next foreground access retry.
-            setClaudeKeychainAccessState(.unknown)
-            return .unknown
-        }
-
+        // An explicit denial is sticky. It is cleared only by a successful
+        // read (see updateClaudeKeychainAccessState), which happens once the
+        // user grants access from the macOS dialog or Keychain Access — never
+        // by elapsed time, or the app would nag a user who said no.
         return state
     }
 
@@ -1006,10 +1023,6 @@ enum AIUsageProvider {
         default:
             break
         }
-    }
-
-    private static func claudeKeychainAccessDeniedAt() -> Date? {
-        UserDefaults.standard.object(forKey: claudeKeychainAccessDeniedAtDefaultsKey) as? Date
     }
 
     private static func preferredClaudeModel(from stats: [String: Any]) -> String? {
