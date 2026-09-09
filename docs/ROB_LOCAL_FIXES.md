@@ -154,6 +154,26 @@ branch (behavior change beyond the bug fix). Expect a small conflict in
 `WeatherManager.swift` when rebasing `rob/local-build` if upstream touches
 the same file.
 
+## Local opt-in: Claude Code User-Agent (rob/local-build only)
+
+Upstream now identifies honestly as `SuperIsland/<version>`. The Claude
+usage endpoint puts unknown agents in a much stricter rate-limit bucket, so
+with the honest agent expect frequent 429s and mostly cached numbers.
+
+This machine opts in to sending Claude Code's User-Agent instead:
+
+```
+defaults write com.workview.SuperIsland.rob aiUsage.claude.useClaudeCodeUserAgent -bool YES
+```
+
+Re-run it after wiping the app's preferences. Turn it off with `-bool NO`.
+
+Know what the trade is: claiming to be another client puts the
+abuse-detection and terms exposure on *this* OAuth account, and it stops
+working the moment the endpoint tightens the check. That is why it is a
+deliberate per-machine choice and never the shipped default — see the
+maintainer's note on PR #98.
+
 ## Building
 
 ```
