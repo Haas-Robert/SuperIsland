@@ -5,7 +5,7 @@ the single source of truth for reproducing, testing, and maintaining the
 build. No secrets belong in this file — never paste tokens, keychain dumps,
 or Authorization headers here.
 
-- Fork: https://github.com/symbiodev/SuperIsland (`origin`)
+- Fork: https://github.com/Haas-Robert/SuperIsland (`origin`)
 - Upstream: https://github.com/shobhit99/SuperIsland (`upstream`)
 - Baseline: upstream/main commit `5619541` ("fix: prevent main-thread freeze
   from leaked RunLoop timers (#89)"), 2 commits after tag `1.0.10`.
