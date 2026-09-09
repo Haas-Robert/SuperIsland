@@ -182,6 +182,21 @@ _PERSIST_MAX_AGE = 24 * 3600.0
 _JSON_SAFE = (str, int, float, bool, type(None))
 
 
+def _boot_time():
+    # Recorded with the snapshot so a reload can tell whether the saved PIDs
+    # still refer to the same running system. Returns None when unknown, which
+    # callers must treat as "PIDs are not trustworthy".
+    try:
+        out = subprocess.run(
+            ["sysctl", "-n", "kern.boottime"],
+            capture_output=True, text=True, timeout=0.8, check=False,
+        ).stdout
+        m = re.search(r"sec\s*=\s*(\d+)", out or "")
+        return int(m.group(1)) if m else None
+    except Exception:
+        return None
+
+
 def _save_sessions():
     with _lock:
         snapshot = []
@@ -192,7 +207,7 @@ def _save_sessions():
         os.makedirs(_STATE_DIR, exist_ok=True)
         tmp = _STATE_FILE + ".tmp"
         with open(tmp, "w") as f:
-            json.dump(snapshot, f)
+            json.dump({"boot_time": _boot_time(), "sessions": snapshot}, f)
         os.replace(tmp, _STATE_FILE)
     except Exception:
         pass
@@ -204,23 +219,54 @@ def _load_sessions():
             snapshot = json.load(f)
     except Exception:
         return
-    if not isinstance(snapshot, list):
+    # Accept both the current {"boot_time": …, "sessions": […]} envelope and
+    # the bare list written by earlier builds.
+    if isinstance(snapshot, dict):
+        saved_boot = snapshot.get("boot_time")
+        entries = snapshot.get("sessions")
+    else:
+        saved_boot = None
+        entries = snapshot
+    if not isinstance(entries, list):
         return
+
+    # PIDs are only meaningful within the boot that recorded them: after a
+    # restart the kernel hands the same numbers to unrelated processes, and
+    # _prune() short-circuits on any entry that has a pid — so a restored
+    # session could stay "Working" forever behind a stranger's PID. Across a
+    # reboot (or an unknown boot time) drop the pid and let TTL pruning deal
+    # with the entry.
+    current_boot = _boot_time()
+    trust_pids = (
+        saved_boot is not None
+        and current_boot is not None
+        and abs(int(saved_boot) - int(current_boot)) <= 2
+    )
+
     now = time.time()
     with _lock:
-        for entry in snapshot:
-            if not isinstance(entry, dict):
+        for entry in entries:
+            try:
+                if not isinstance(entry, dict):
+                    continue
+                agent = entry.get("agent")
+                session_id = entry.get("session_id")
+                if not agent or not session_id:
+                    continue
+                updated_at = entry.get("updated_at")
+                if not isinstance(updated_at, (int, float)) or isinstance(updated_at, bool):
+                    continue
+                if now - updated_at > _PERSIST_MAX_AGE:
+                    continue
+                if not trust_pids:
+                    entry.pop("pid", None)
+                key = (agent, session_id)
+                if key not in _sessions:
+                    _sessions[key] = entry
+            except Exception:
+                # A hand-edited or corrupted entry must never keep the bridge
+                # from starting — skip it and carry on.
                 continue
-            agent = entry.get("agent")
-            session_id = entry.get("session_id")
-            if not agent or not session_id:
-                continue
-            updated_at = entry.get("updated_at") or 0
-            if now - updated_at > _PERSIST_MAX_AGE:
-                continue
-            key = (agent, session_id)
-            if key not in _sessions:
-                _sessions[key] = entry
 
 # Pending AskUserQuestion permissions. Each entry blocks a PermissionRequest
 # hook thread on its `event` until the extension POSTs /permission/resolve
