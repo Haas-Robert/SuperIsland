@@ -27,9 +27,9 @@ struct HTTPJSONResult {
 /// Fetches Claude subscription usage from the OAuth usage endpoint.
 ///
 /// Responsibilities beyond a plain request:
-/// - sends a Claude Code User-Agent (the endpoint rate-limits unknown agents
-///   into a far stricter bucket, which is how the module ended up permanently
-///   throttled with the generic app User-Agent),
+/// - identifies as this app by default; the endpoint rate-limits unknown
+///   agents into a far stricter bucket, so the caller may opt in to Claude
+///   Code's User-Agent instead (see AIUsageProvider.claudeUsageUserAgent),
 /// - honors 429 Retry-After (numeric or HTTP-date) and refuses to issue
 ///   another request before `nextAllowedFetchAt`,
 /// - keeps the last successful payload and serves it marked as stale while
@@ -244,6 +244,10 @@ final class ClaudeUsageFetcher {
         payload["stale"] = true
         payload["source"] = "oauth-api-stale"
         payload["statusLabel"] = "\(reason.label) — showing cached data"
+        // Whatever the cached payload said about being blocked describes a
+        // moment we can no longer verify — after a sign-out it would other-
+        // wise keep claiming the account is blocked until the app restarts.
+        payload["isBlocked"] = false
         return payload
     }
 
