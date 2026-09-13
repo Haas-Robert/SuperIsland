@@ -416,7 +416,13 @@ struct IslandContainerView: View {
 
         let pointerLocation = NSEvent.mouseLocation
         // Multi-display: hover is valid if the pointer is over ANY island.
-        guard !islandPanels.contains(where: { $0.frame.contains(pointerLocation) }) else { return }
+        // The pointer rests exactly on the screen's top edge when pushed
+        // against it, and NSRect.contains excludes the maximal edges — so a
+        // panel that touches the top of the screen would read as "not
+        // containing" a cursor parked there, force-unhovering every tick and
+        // making the island collapse and re-expand in a loop. Expand the
+        // frame by a point so edge-clamped pointer positions count as inside.
+        guard !islandPanels.contains(where: { $0.frame.insetBy(dx: -1, dy: -1).contains(pointerLocation) }) else { return }
 
         isHoveringIslandSurface = false
         isHoveringPreviousButton = false
