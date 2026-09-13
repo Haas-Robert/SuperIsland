@@ -9,7 +9,11 @@ enum AIUsageProvider {
     private static let claudeKeychainAccessStateDefaultsKey = "aiUsage.claude.keychainAccessState"
     private static let claudeKeychainAccessDeniedAtDefaultsKey = "aiUsage.claude.keychainAccessDeniedAt"
     private static let claudeKeychainPromptedDefaultsKey = "aiUsage.claude.keychainPrompted"
-    private static let claudeKeychainAccessRetryInterval: TimeInterval = 24 * 60 * 60
+    private static let claudeKeychainPromptedAtDefaultsKey = "aiUsage.claude.keychainPromptedAt"
+    private static let claudeKeychainPromptCooldown: TimeInterval = 24 * 60 * 60
+    /// Opt-in (off by default): send Claude Code's User-Agent instead of this
+    /// app's own. See claudeUsageUserAgent().
+    private static let claudeCodeUserAgentDefaultsKey = "aiUsage.claude.useClaudeCodeUserAgent"
     private static var cachedSnapshot: [String: Any]?
     private static var cachedAt: Date?
     private static let cacheLock = NSLock()
@@ -20,7 +24,32 @@ enum AIUsageProvider {
     // SecItemCopyMatching and — for apps not on the keychain item's ACL —
     // macOS prompts for the login password on every read.
     private static let claudeTokenLock = NSLock()
-    private static var cachedClaudeKeychainToken: String?
+    private static var cachedClaudeKeychainToken: ClaudeUsageFetcher.Token?
+
+    /// The usage endpoint puts unknown agents in a much stricter rate-limit
+    /// bucket than Claude Code's own, so identifying honestly costs data:
+    /// expect frequent 429s and mostly cached numbers. Claiming to be Claude
+    /// Code buys accuracy, but it is the user's OAuth account that carries
+    /// the abuse-detection and terms risk, and it breaks the moment the
+    /// endpoint tightens the check — so it is never the default. Users who
+    /// accept that trade opt in explicitly:
+    ///
+    ///     defaults write <bundle-id> aiUsage.claude.useClaudeCodeUserAgent -bool YES
+    static func claudeUsageUserAgent() -> String {
+        if UserDefaults.standard.bool(forKey: claudeCodeUserAgentDefaultsKey) {
+            return ClaudeCodeVersionDetector.userAgent()
+        }
+        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
+        return "SuperIsland/\(version)"
+    }
+
+    static let claudeFetcher = ClaudeUsageFetcher(
+        userAgent: { claudeUsageUserAgent() },
+        loadToken: { loadClaudeToken(ignoringCache: $0) },
+        invalidateCachedToken: { invalidateCachedClaudeToken() },
+        httpFetch: { performHTTPJSONRequest($0, timeout: 3.0) },
+        buildPayload: { claudeOAuthResponsePayload(from: $0, updatedAt: $1) }
+    )
 
     private enum ClaudeKeychainAccessState: String {
         case unknown
@@ -201,10 +230,13 @@ enum AIUsageProvider {
             return statsPayload
         }
 
+        // Surface the last OAuth failure so the UI can distinguish
+        // rate-limited / auth-error / offline from a plain "no data".
+        let failure = claudeFetcher.lastFailure
         return [
             "available": false,
             "status": NSNull(),
-            "statusLabel": NSNull(),
+            "statusLabel": failure?.label ?? NSNull(),
             "remainingPercent": NSNull(),
             "weeklyRemainingPercent": NSNull(),
             "currentSessionRemainingPercent": NSNull(),
@@ -214,7 +246,7 @@ enum AIUsageProvider {
             "updatedAt": updatedAt,
             "unifiedRateLimitFallbackAvailable": false,
             "isBlocked": false,
-            "source": "unavailable"
+            "source": failure?.rawValue ?? "unavailable"
         ]
     }
 
@@ -241,20 +273,12 @@ enum AIUsageProvider {
     }
 
     private static func loadClaudePayloadFromOAuthAPI(updatedAt: Int) -> [String: Any]? {
-        guard let accessToken = loadClaudeAccessToken(),
-              let url = URL(string: "https://api.anthropic.com/api/oauth/usage"),
-              let response = fetchJSON(
-                url: url,
-                bearerToken: accessToken,
-                timeout: 3.0,
-                extraHeaders: [
-                    "anthropic-beta": "oauth-2025-04-20",
-                    "Content-Type": "application/json"
-                ]
-              ) else {
-            return nil
-        }
+        claudeFetcher.payload(updatedAt: updatedAt)
+    }
 
+    /// Maps a successful OAuth usage response to the module payload.
+    /// Returns nil when the response lacks the expected usage windows.
+    static func claudeOAuthResponsePayload(from response: [String: Any], updatedAt: Int) -> [String: Any]? {
         guard let sessionRemainingPercent = claudeCurrentSessionRemainingPercent(from: response) else {
             return nil
         }
@@ -495,7 +519,11 @@ enum AIUsageProvider {
         return nil
     }
 
-    private static func loadClaudeAccessToken() -> String? {
+    /// Loads the Claude OAuth token together with its expiry so callers can
+    /// avoid sending requests with a token Claude Code has already rotated.
+    /// `ignoringCache` forces a fresh keychain read (used after auth errors)
+    /// and never prompts the user.
+    static func loadClaudeToken(ignoringCache: Bool) -> ClaudeUsageFetcher.Token? {
         let environment = ProcessInfo.processInfo.environment
         let envKeys = [
             "CLAUDE_CODE_OAUTH_ACCESS_TOKEN",
@@ -505,35 +533,37 @@ enum AIUsageProvider {
         for key in envKeys {
             if let token = environment[key]?.trimmingCharacters(in: .whitespacesAndNewlines),
                !token.isEmpty {
-                return token
+                return ClaudeUsageFetcher.Token(value: token, expiresAt: nil)
             }
         }
 
-        if let token = loadClaudeAccessTokenFromCredentialsFile() {
+        if let token = loadClaudeTokenFromCredentialsFile() {
             return token
         }
 
         #if os(macOS)
-        claudeTokenLock.lock()
-        let cachedKeychain = cachedClaudeKeychainToken
-        claudeTokenLock.unlock()
-        if let cachedKeychain {
-            return cachedKeychain
+        if !ignoringCache {
+            claudeTokenLock.lock()
+            let cachedKeychain = cachedClaudeKeychainToken
+            claudeTokenLock.unlock()
+            if let cachedKeychain {
+                return cachedKeychain
+            }
         }
 
-        if let token = loadClaudeAccessTokenFromKeychain(allowUserInteraction: false) {
+        if let token = loadClaudeTokenFromKeychain(allowUserInteraction: false) {
             claudeTokenLock.lock()
             cachedClaudeKeychainToken = token
             claudeTokenLock.unlock()
             return token
         }
 
-        guard shouldPromptForClaudeKeychainAccess() else {
+        guard !ignoringCache, shouldPromptForClaudeKeychainAccess() else {
             return nil
         }
 
         setClaudeKeychainPrompted()
-        if let token = loadClaudeAccessTokenFromKeychain(allowUserInteraction: true) {
+        if let token = loadClaudeTokenFromKeychain(allowUserInteraction: true) {
             claudeTokenLock.lock()
             cachedClaudeKeychainToken = token
             claudeTokenLock.unlock()
@@ -544,7 +574,13 @@ enum AIUsageProvider {
         return nil
     }
 
-    private static func loadClaudeAccessTokenFromCredentialsFile() -> String? {
+    static func invalidateCachedClaudeToken() {
+        claudeTokenLock.lock()
+        cachedClaudeKeychainToken = nil
+        claudeTokenLock.unlock()
+    }
+
+    private static func loadClaudeTokenFromCredentialsFile() -> ClaudeUsageFetcher.Token? {
         let credentialCandidates = homePathCandidates([
             ".claude/.credentials.json",
             ".claude/credentials.json",
@@ -557,7 +593,7 @@ enum AIUsageProvider {
             guard FileManager.default.fileExists(atPath: url.path),
                   let data = try? Data(contentsOf: url),
                   let object = try? JSONSerialization.jsonObject(with: data),
-                  let token = claudeAccessToken(fromJSONObject: object) else {
+                  let token = claudeToken(fromJSONObject: object) else {
                 continue
             }
             return token
@@ -578,6 +614,25 @@ enum AIUsageProvider {
 
         let trimmed = token.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed
+    }
+
+    static func claudeToken(fromJSONObject object: Any) -> ClaudeUsageFetcher.Token? {
+        guard let token = claudeAccessToken(fromJSONObject: object) else {
+            return nil
+        }
+
+        // Claude Code stores expiresAt as milliseconds since the epoch;
+        // accept plain seconds too in case the format ever changes.
+        let expiresAt = findNumberValue(
+            in: object,
+            keys: ["expiresAt", "expires_at"],
+            depth: 0,
+            maxDepth: 8
+        ).map { raw in
+            Date(timeIntervalSince1970: raw > 10_000_000_000 ? raw / 1000 : raw)
+        }
+
+        return ClaudeUsageFetcher.Token(value: token, expiresAt: expiresAt)
     }
 
     private static func findStringValue(
@@ -626,8 +681,54 @@ enum AIUsageProvider {
         return nil
     }
 
+    private static func findNumberValue(
+        in object: Any,
+        keys: Set<String>,
+        depth: Int,
+        maxDepth: Int
+    ) -> Double? {
+        if depth > maxDepth {
+            return nil
+        }
+
+        if let dictionary = object as? [String: Any] {
+            for key in keys {
+                if let value = asDoubleOrNil(dictionary[key]) {
+                    return value
+                }
+            }
+
+            for value in dictionary.values {
+                if let nested = findNumberValue(
+                    in: value,
+                    keys: keys,
+                    depth: depth + 1,
+                    maxDepth: maxDepth
+                ) {
+                    return nested
+                }
+            }
+            return nil
+        }
+
+        if let array = object as? [Any] {
+            for value in array {
+                if let nested = findNumberValue(
+                    in: value,
+                    keys: keys,
+                    depth: depth + 1,
+                    maxDepth: maxDepth
+                ) {
+                    return nested
+                }
+            }
+        }
+
+        return nil
+    }
+
     #if os(macOS)
-    private static func loadClaudeAccessTokenFromKeychain(allowUserInteraction: Bool) -> String? {
+    private static func loadClaudeTokenFromKeychain(allowUserInteraction: Bool) -> ClaudeUsageFetcher.Token? {
         let context = LAContext()
         context.interactionNotAllowed = !allowUserInteraction
         context.localizedReason = "Access Claude Code credentials for AI usage status."
@@ -639,16 +740,36 @@ enum AIUsageProvider {
             kSecMatchLimit as String: kSecMatchLimitOne
         ]
         query[kSecUseAuthenticationContext as String] = context
+        if !allowUserInteraction {
+            // LAContext.interactionNotAllowed suppresses LocalAuthentication
+            // UI, but NOT the classic securityd ACL password dialog — without
+            // this flag every background read of an item we lost the ACL
+            // grant for (Claude Code occasionally recreates the item, which
+            // drops the "Always Allow" entry) pops the password prompt.
+            query[kSecUseAuthenticationUI as String] = kSecUseAuthenticationUIFail
+        }
 
+        // kSecUseAuthenticationUI only governs data-protection keychain items.
+        // "Claude Code-credentials" lives in the legacy file-based login
+        // keychain, whose ACL password dialog ignores it — the deprecated
+        // process-global switch is the only way to keep a background read
+        // from prompting. Restore it immediately so an interactive attempt
+        // (at most one per day) can still show the dialog.
+        if !allowUserInteraction {
+            SecKeychainSetUserInteractionAllowed(false)
+        }
         var result: CFTypeRef?
         let status = SecItemCopyMatching(query as CFDictionary, &result)
+        if !allowUserInteraction {
+            SecKeychainSetUserInteractionAllowed(true)
+        }
         updateClaudeKeychainAccessState(for: status)
         guard status == errSecSuccess, let data = result as? Data else {
             return nil
         }
 
         if let object = try? JSONSerialization.jsonObject(with: data),
-           let token = claudeAccessToken(fromJSONObject: object) {
+           let token = claudeToken(fromJSONObject: object) {
             return token
         }
 
@@ -663,7 +784,7 @@ enum AIUsageProvider {
 
         if let jsonData = trimmed.data(using: .utf8),
            let object = try? JSONSerialization.jsonObject(with: jsonData),
-           let token = claudeAccessToken(fromJSONObject: object) {
+           let token = claudeToken(fromJSONObject: object) {
             return token
         }
 
@@ -673,17 +794,34 @@ enum AIUsageProvider {
 
     private static func shouldPromptForClaudeKeychainAccess() -> Bool {
         #if os(macOS)
+        // Someone who refused access is never asked again by the app.
         guard claudeKeychainAccessState() != .denied else {
             return false
         }
-        return !UserDefaults.standard.bool(forKey: claudeKeychainPromptedDefaultsKey)
+        if let promptedAt = UserDefaults.standard.object(forKey: claudeKeychainPromptedAtDefaultsKey) as? Date {
+            // Not a denial, so this is the "ACL grant lost" case: Claude Code
+            // occasionally recreates the keychain item, which drops the
+            // "Always Allow" entry. One retry per day recovers from that
+            // without turning into a daily nag.
+            return Date().timeIntervalSince(promptedAt) > claudeKeychainPromptCooldown
+        }
+        if UserDefaults.standard.bool(forKey: claudeKeychainPromptedDefaultsKey) {
+            // Upgrading from the legacy once-forever flag: record when we
+            // adopted it instead of prompting straight away, so an existing
+            // user is not re-prompted just because the app updated.
+            UserDefaults.standard.set(Date(), forKey: claudeKeychainPromptedAtDefaultsKey)
+            UserDefaults.standard.removeObject(forKey: claudeKeychainPromptedDefaultsKey)
+            return false
+        }
+        return true
         #else
         return false
         #endif
     }
 
     private static func setClaudeKeychainPrompted() {
-        UserDefaults.standard.set(true, forKey: claudeKeychainPromptedDefaultsKey)
+        UserDefaults.standard.set(Date(), forKey: claudeKeychainPromptedAtDefaultsKey)
+        UserDefaults.standard.removeObject(forKey: claudeKeychainPromptedDefaultsKey)
     }
 
     private static func claudeKeychainAccessState() -> ClaudeKeychainAccessState {
@@ -692,18 +830,10 @@ enum AIUsageProvider {
             return .unknown
         }
 
-        guard state == .denied else {
-            return state
-        }
-
-        guard let deniedAt = claudeKeychainAccessDeniedAt(),
-              Date().timeIntervalSince(deniedAt) < claudeKeychainAccessRetryInterval else {
-            // A stale denial should not suppress the prompt forever. If we do not
-            // know when the user last denied, let the next foreground access retry.
-            setClaudeKeychainAccessState(.unknown)
-            return .unknown
-        }
-
+        // An explicit denial is sticky. It is cleared only by a successful
+        // read (see updateClaudeKeychainAccessState), which happens once the
+        // user grants access from the macOS dialog or Keychain Access — never
+        // by elapsed time, or the app would nag a user who said no.
         return state
     }
 
@@ -739,10 +869,6 @@ enum AIUsageProvider {
         }
     }
 
-    private static func claudeKeychainAccessDeniedAt() -> Date? {
-        UserDefaults.standard.object(forKey: claudeKeychainAccessDeniedAtDefaultsKey) as? Date
-    }
-
     private static func preferredClaudeModel(from stats: [String: Any]) -> String? {
         guard let modelUsage = stats["modelUsage"] as? [String: Any], !modelUsage.isEmpty else {
             return nil
@@ -765,6 +891,34 @@ enum AIUsageProvider {
     }
 
     // MARK: - Shared
+
+    /// Synchronous HTTP request that preserves status code, headers, and
+    /// transport errors. Used by the Claude fetcher; Codex keeps the simpler
+    /// `fetchJSON` below.
+    static func performHTTPJSONRequest(_ request: URLRequest, timeout: TimeInterval) -> HTTPJSONResult {
+        let semaphore = DispatchSemaphore(value: 0)
+        var captured: (data: Data?, response: URLResponse?, error: Error?) = (nil, nil, nil)
+
+        let task = URLSession.shared.dataTask(with: request) { data, response, error in
+            captured = (data, response, error)
+            semaphore.signal()
+        }
+
+        task.resume()
+        if semaphore.wait(timeout: .now() + timeout + 0.3) == .timedOut {
+            task.cancel()
+            return HTTPJSONResult(statusCode: nil, headers: [:], json: nil, error: URLError(.timedOut))
+        }
+
+        let http = captured.response as? HTTPURLResponse
+        let json = captured.data.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
+        return HTTPJSONResult(
+            statusCode: http?.statusCode,
+            headers: http?.allHeaderFields ?? [:],
+            json: json,
+            error: captured.error
+        )
+    }
 
     private static func fetchJSON(
         url: URL,

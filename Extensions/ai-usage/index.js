@@ -38,12 +38,28 @@ function sourceLabel(source) {
   switch (source) {
     case "oauth-api":
       return "OAuth API";
+    case "oauth-api-stale":
+      return "OAuth API (stale)";
     case "local-summary":
       return "Local summary";
     case "auth-token":
       return "Auth token";
     case "stats-cache":
       return "Stats cache";
+    case "rate-limited":
+      return "Rate limited";
+    case "auth-error":
+      return "Auth error";
+    case "no-token":
+      return "Not signed in";
+    case "token-expired":
+      return "Token expired";
+    case "server-error":
+      return "Server error";
+    case "network-error":
+      return "Offline";
+    case "parse-error":
+      return "Bad response";
     case "unavailable":
       return "Unavailable";
     default:
