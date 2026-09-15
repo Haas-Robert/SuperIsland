@@ -237,11 +237,12 @@ branch/merge from `rob/local-build`, and update the table below.
 | Full-expanded tab strip + adaptive island width | PR #99 open (2026-08-19) | `5b02ef6` | yes |
 | Island collapse loop at top screen edge | PR #100 open (2026-08-19) | `3940d6f` | yes |
 | Tab icon contrast + hover/selected states | part of PR #99 (2026-08-19) | `4bcece2` | yes |
-| Island above menu bar managers (Ice) | PR #101 open (2026-08-19) | `025d710` | yes |
+| Island above menu bar managers (Ice) — constant level | PR #101 open (2026-08-19, corrected 2026-09-15) | `fix/island-above-menubar-managers` | yes |
 | Notch side slots + compact notifications | PR #102 open (2026-08-19) | `7a5f203` | yes |
 | Agents Status worktree labels + turn runtime + session persistence | PR #103 open (2026-08-21, extended 2026-08-22) | `d429914`, `025f008` | yes |
 | Weather multi-day forecast | PR #104 open (2026-08-22) | `feat/weather-forecast` | yes |
 | App Nap throttling refresh timers | PR #107 open (2026-09-03) | `fix/prevent-app-nap` | yes |
+| HUD content sticks in the compact island | PR #109 open (2026-09-15) | `fix/hud-restores-module` | yes |
 
 Local-only additions (never for upstream): IP geolocation Weather fallback
 (`0d8a5da`), product identity (`SuperIsland Rob`), AI Usage limits view
