@@ -205,18 +205,6 @@ final class IslandWindowController {
     private func setupDidChangeStateHook() {
         appState.didChangeState = { [weak self] oldState, newState in
             guard let self else { return }
-            // Raise the island above menu bar manager bars as it expands.
-            // Dropping back down happens only once the window has shrunk
-            // again (see the .compact branch in observeStateChanges):
-            // re-ordering a window that still spans the whole expanded frame
-            // drags a large transparent surface across the manager's bar in
-            // the middle of the collapse repaint, which leaves stale
-            // fragments beside and below the pill.
-            if newState != .compact {
-                for panel in self.panels.values {
-                    panel.applyLevel(forExpanded: true)
-                }
-            }
             let oldSize = self.appState.windowSize(for: oldState)
             let newSize = self.appState.windowSize(for: newState)
 
@@ -285,16 +273,9 @@ final class IslandWindowController {
                         guard let self,
                               self.appState.currentState == .compact else { return }
                         self.applyFrameToAll(size: self.appState.windowSize)
+                        // Force tracking area recalculation so the next
+                        // hover on the compact notch is detected.
                         for panel in self.panels.values {
-                            // Now that the window is pill-sized again it is
-                            // safe to drop back below menu bar manager bars.
-                            panel.applyLevel(forExpanded: false)
-                            // Discard compositing left over from the
-                            // expanded frame.
-                            panel.invalidateShadow()
-                            panel.contentView?.needsDisplay = true
-                            // Force tracking area recalculation so the next
-                            // hover on the compact notch is detected.
                             panel.contentView?.subviews.forEach { $0.updateTrackingAreas() }
                         }
                     }

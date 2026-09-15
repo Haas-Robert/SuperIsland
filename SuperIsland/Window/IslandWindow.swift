@@ -29,7 +29,16 @@ final class IslandPanel: NSPanel {
             defer: false
         )
 
-        applyLevel(forExpanded: false)
+        // One step above .statusBar. Menu bar managers (Ice, Bartender,
+        // HiddenBar) draw their bars at .statusBar, and within one level
+        // whichever window ordered last wins — so the island's z-order
+        // against such a bar flipped at runtime: sometimes the bar covered
+        // the expanded island, sometimes it half-covered the compact pill
+        // and only the pill's edges leaked out as stray fragments. Sitting a
+        // level higher makes the island look the same whether or not a
+        // manager is installed (it is above the real menu bar either way),
+        // while staying below .popUpMenu so menus still draw on top.
+        level = NSWindow.Level(rawValue: NSWindow.Level.statusBar.rawValue + 1)
         collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle]
         isOpaque = false
         backgroundColor = .clear
@@ -50,18 +59,5 @@ final class IslandPanel: NSPanel {
 
     func setVisibleInScreenRecordings(_ visible: Bool) {
         sharingType = visible ? .readOnly : .none
-    }
-
-    /// Menu bar managers (Ice, Bartender, HiddenBar) draw their overflow
-    /// bars at the .statusBar level, and within one level whichever window
-    /// ordered last wins. While the island is expanded it sits one step
-    /// above .statusBar so such a bar can never cover the opened island
-    /// (still below .popUpMenu, so menus and dropdowns stay on top). While
-    /// compact it stays at .statusBar — an idle pill floating above the
-    /// manager's bar would read as stray fragments in the menu bar.
-    func applyLevel(forExpanded expanded: Bool) {
-        level = expanded
-            ? NSWindow.Level(rawValue: NSWindow.Level.statusBar.rawValue + 1)
-            : .statusBar
     }
 }
