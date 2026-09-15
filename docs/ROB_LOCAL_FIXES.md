@@ -154,6 +154,20 @@ branch (behavior change beyond the bug fix). Expect a small conflict in
 `WeatherManager.swift` when rebasing `rob/local-build` if upstream touches
 the same file.
 
+## Local behavior: side slots only while playing (rob/local-build only)
+
+Upstream shows the Now Playing side-slot pill (wider than the notch)
+whenever any app has a track loaded, even paused. On a light wallpaper
+that is a permanent black bar beside the camera — the "artifacts"
+reported with Ice were exactly this pill, sometimes half-covered by Ice's
+bar while the two shared a window level (fixed upstream-side in PR #101
+by keeping the island one level above).
+
+Here, media claims the compact island only while `isPlaying`; a paused
+track falls back to the default compact content and the window refits on
+play/pause. Full "nothing beside the notch, ever" is still available via
+Settings → General → Hide side slots.
+
 ## Local opt-in: Claude Code User-Agent (rob/local-build only)
 
 Upstream now identifies honestly as `SuperIsland/<version>`. The Claude
