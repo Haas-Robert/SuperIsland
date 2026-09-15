@@ -304,6 +304,17 @@ final class IslandWindowController {
                 self?.updateCompactFrameIfNeeded()
             }
             .store(in: &cancellables)
+
+        // rob/local-build: the side-slot layout now depends on playback
+        // state, so a play/pause toggle with an unchanged title must refit
+        // the compact window too.
+        NowPlayingManager.shared.$isPlaying
+            .removeDuplicates()
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                self?.updateCompactFrameIfNeeded()
+            }
+            .store(in: &cancellables)
     }
 
     private func updateCompactFrameIfNeeded() {

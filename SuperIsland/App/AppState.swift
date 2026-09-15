@@ -1012,7 +1012,11 @@ final class AppState: ObservableObject {
 
     var compactPresentationModule: ActiveModule? {
         let nowPlaying = NowPlayingManager.shared
-        let hasCompactMediaCandidate = nowPlayingEnabled && (
+        // rob/local-build: media only claims the compact island while it is
+        // actually playing. Upstream shows the side-slot pill whenever any app
+        // merely has a track loaded, which keeps a black pill wider than the
+        // notch parked on the menu bar all day on a light wallpaper.
+        let hasCompactMediaCandidate = nowPlayingEnabled && nowPlaying.isPlaying && (
             !nowPlaying.title.isEmpty ||
             nowPlaying.albumArt != nil ||
             !nowPlaying.sourceName.isEmpty

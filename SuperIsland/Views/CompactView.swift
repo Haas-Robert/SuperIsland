@@ -26,7 +26,7 @@ struct CompactView: View {
     }
 
     private var horizontalPadding: CGFloat {
-        let isNowPlayingActive = appState.activeBuiltInModule == .nowPlaying || (appState.nowPlayingEnabled && appState.activeModule == nil && !nowPlaying.title.isEmpty)
+        let isNowPlayingActive = appState.activeBuiltInModule == .nowPlaying || (appState.nowPlayingEnabled && appState.activeModule == nil && nowPlaying.isPlaying && !nowPlaying.title.isEmpty)
         let base: CGFloat = isNowPlayingActive ? 4 : 12
         // On non-notch Macs, add padding to keep content within the arch walls.
         if appState.usesWideCompactLayout {
@@ -85,7 +85,7 @@ struct CompactView: View {
                 case .extension_(let extensionID):
                     ExtensionRendererView(extensionID: extensionID, displayMode: .compact)
                 }
-            } else if appState.nowPlayingEnabled, !nowPlaying.title.isEmpty {
+            } else if appState.nowPlayingEnabled, nowPlaying.isPlaying, !nowPlaying.title.isEmpty {
                 NowPlayingCompactView()
             } else {
                 BatteryCompactView()
