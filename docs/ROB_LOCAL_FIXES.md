@@ -188,6 +188,35 @@ working the moment the endpoint tightens the check. That is why it is a
 deliberate per-machine choice and never the shipped default — see the
 maintainer's note on PR #98.
 
+## Fix: Agents Status stuck on "Setup required" after a reboot
+
+**Symptom.** After a Mac restart the Agents tab shows "Setup required ·
+Bridge unreachable · run server/install.sh" plus a system notification,
+and stays that way for hours even though `curl 127.0.0.1:7823/health`
+is fine. Opening the Agents tab once "fixes" it.
+
+**Root cause** (2026-10-07). Two host behaviours combine:
+
+1. `ExtensionManager.activate` waits only 2 s
+   (`AgentsStatusBridge.waitForListening`) for the freshly spawned Python
+   server; on a cold post-reboot login it is not listening yet, so the JS
+   `onActivate`'s first `POST /control/resume` is refused and the extension
+   sets `activationFailed` + notifies.
+2. With `energy.mode = lowPower` (or smart mode while compact) the host
+   skips *repeating* JS timers for hidden modules, so the 800 ms poll that
+   would clear the flag never runs until the module is visible.
+
+Proof without the in-memory extension log: the bridge rewrites
+`~/.codex/config.toml`, `~/.codex/hooks.json` and `~/.claude/settings.json`
+when the extension re-applies hooks on the offline→online transition — their
+mtimes mark the moment it finally came online.
+
+**Fix** (`fix/agents-status-activation-retry`, cherry-picked as `32f8867`):
+`index.js` retries `/control/resume` with one-shot timers (never suspended)
+for ~27 s before reporting failure, and while offline schedules a 5 s
+one-shot reconnect probe; `waitForListening` logs a warning on timeout.
+Node tests: `node --test Extensions/agents-status/test_index.js`.
+
 ## Building
 
 ```
@@ -217,6 +246,13 @@ xcodebuild test -project SuperIsland.xcodeproj -scheme SuperIsland \
 
 ## Syncing with upstream releases
 
+**Pending (2026-10-07):** `main` was fast-forwarded to upstream `68cce87`,
+which merged PR #98 (Claude usage, as `d0a3451`) and PR #100. Merging that
+`main` into `rob/local-build` conflicts in `ClaudeUsageFetcher.swift` /
+`AIUsageProvider.swift` / `ClaudeUsageFetcherTests.swift` (upstream's
+landed form vs. our `fix/claude-ai-usage`); the sync was deferred, the
+local build still carries our own versions of both fixes.
+
 ```
 git fetch upstream --tags
 git checkout main && git merge --ff-only upstream/main && git push origin main
@@ -243,6 +279,7 @@ branch/merge from `rob/local-build`, and update the table below.
 | Weather multi-day forecast | PR #104 open (2026-08-22) | `feat/weather-forecast` | yes |
 | App Nap throttling refresh timers | PR #107 open (2026-09-03) | `fix/prevent-app-nap` | yes |
 | HUD content sticks in the compact island | PR #109 open (2026-09-15) | `fix/hud-restores-module` | yes |
+| Agents Status activation retry + offline probe | not yet opened (2026-10-07) | `32f8867` (branch `fix/agents-status-activation-retry` on new `main`) | yes |
 
 Local-only additions (never for upstream): IP geolocation Weather fallback
 (`0d8a5da`), product identity (`SuperIsland Rob`), AI Usage limits view
