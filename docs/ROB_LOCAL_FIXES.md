@@ -16,7 +16,7 @@ or Authorization headers here.
 | --- | --- |
 | `main` | Mirrors `upstream/main`, never carries local commits |
 | `fix/weather-location` | Weather fix only (PR 1 candidate) |
-| `fix/claude-ai-usage` | Claude usage fix only (PR 2 candidate) |
+| ~~`fix/claude-ai-usage`~~ | merged upstream as PR #98 (`d0a3451`); local branch deleted 2026-10-08 |
 | `rob/local-build` | Both fixes merged + local-build identity changes |
 
 ## Fix 1: Weather showed nothing (Core Location assertion)
@@ -254,7 +254,6 @@ files, which are upstream's `d0a3451` plus the local-only additions).
 git fetch upstream --tags
 git checkout main && git merge --ff-only upstream/main && git push origin main
 git checkout fix/weather-location && git rebase main
-git checkout fix/claude-ai-usage && git rebase main
 git checkout rob/local-build && git rebase main
 xcodegen generate && ./scripts/build-dmg.sh
 ```
