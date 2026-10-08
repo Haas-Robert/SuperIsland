@@ -211,7 +211,7 @@ Proof without the in-memory extension log: the bridge rewrites
 when the extension re-applies hooks on the offline→online transition — their
 mtimes mark the moment it finally came online.
 
-**Fix** (`fix/agents-status-activation-retry`, cherry-picked as `32f8867`):
+**Fix** (`fix/agents-status-activation-retry`, upstream PR #110, cherry-picked as `32f8867`):
 `index.js` retries `/control/resume` with one-shot timers (never suspended)
 for ~27 s before reporting failure, and while offline schedules a 5 s
 one-shot reconnect probe; `waitForListening` logs a warning on timeout.
@@ -246,12 +246,9 @@ xcodebuild test -project SuperIsland.xcodeproj -scheme SuperIsland \
 
 ## Syncing with upstream releases
 
-**Pending (2026-10-07):** `main` was fast-forwarded to upstream `68cce87`,
-which merged PR #98 (Claude usage, as `d0a3451`) and PR #100. Merging that
-`main` into `rob/local-build` conflicts in `ClaudeUsageFetcher.swift` /
-`AIUsageProvider.swift` / `ClaudeUsageFetcherTests.swift` (upstream's
-landed form vs. our `fix/claude-ai-usage`); the sync was deferred, the
-local build still carries our own versions of both fixes.
+**Done 2026-10-08:** `main` fast-forwarded to upstream `68cce87` and merged
+into `rob/local-build` (merge commit keeps our versions of the Claude usage
+files, which are upstream's `d0a3451` plus the local-only additions).
 
 ```
 git fetch upstream --tags
@@ -269,9 +266,9 @@ branch/merge from `rob/local-build`, and update the table below.
 | Fix | Upstream status | Local commit | Still needed |
 | --- | --- | --- | --- |
 | Weather CL delegate | PR #97 open (2026-08-19) | `16c9cba` | yes |
-| Claude usage rate limits + keychain prompt fix | PR #98 open (2026-08-19, extended 2026-08-26) | `6301400`, `163e36e` | yes |
+| Claude usage rate limits + keychain prompt fix | PR #98 **merged** upstream as `d0a3451` (2026-10) | `6301400`, `163e36e`, `d548d75` | no — in `main`; local-only additions on top remain |
 | Full-expanded tab strip + adaptive island width | PR #99 open (2026-08-19) | `5b02ef6` | yes |
-| Island collapse loop at top screen edge | PR #100 open (2026-08-19) | `3940d6f` | yes |
+| Island collapse loop at top screen edge | PR #100 **merged** upstream as `68cce87` (2026-10) | `3940d6f` | no — in `main` |
 | Tab icon contrast + hover/selected states | part of PR #99 (2026-08-19) | `4bcece2` | yes |
 | Island above menu bar managers (Ice) — constant level | PR #101 open (2026-08-19, corrected 2026-09-15) | `fix/island-above-menubar-managers` | yes |
 | Notch side slots + compact notifications | PR #102 open (2026-08-19) | `7a5f203` | yes |
@@ -279,7 +276,7 @@ branch/merge from `rob/local-build`, and update the table below.
 | Weather multi-day forecast | PR #104 open (2026-08-22) | `feat/weather-forecast` | yes |
 | App Nap throttling refresh timers | PR #107 open (2026-09-03) | `fix/prevent-app-nap` | yes |
 | HUD content sticks in the compact island | PR #109 open (2026-09-15) | `fix/hud-restores-module` | yes |
-| Agents Status activation retry + offline probe | not yet opened (2026-10-07) | `32f8867` (branch `fix/agents-status-activation-retry` on new `main`) | yes |
+| Agents Status activation retry + offline probe | PR #110 open (2026-10-08) | `32f8867` (branch `fix/agents-status-activation-retry`) | yes |
 
 Local-only additions (never for upstream): IP geolocation Weather fallback
 (`0d8a5da`), product identity (`SuperIsland Rob`), AI Usage limits view

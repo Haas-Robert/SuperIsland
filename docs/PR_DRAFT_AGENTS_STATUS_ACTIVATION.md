@@ -1,4 +1,4 @@
-# PR draft — do not open without Rob's confirmation
+# PR draft — opened as shobhit99/SuperIsland#110 on 2026-10-08
 
 Branch: `fix/agents-status-activation-retry` → `shobhit99/SuperIsland:main`
 (based on upstream `68cce87`)
