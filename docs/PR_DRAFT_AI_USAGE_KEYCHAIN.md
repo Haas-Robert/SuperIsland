@@ -1,7 +1,7 @@
 # PR draft — opened as shobhit99/SuperIsland#114 on 2026-11-20
 
 Branch: `fix/ai-usage-keychain-state` → `shobhit99/SuperIsland:main`
-(based on upstream `68cce87`, single commit `8e12c3a`)
+(based on upstream `68cce87`, commits `8e12c3a` + `364fd84`)
 
 ## Title
 
@@ -81,3 +81,33 @@ from a shell (what Claude Code does on refresh) and watch the next poll —
 before the fix `keychainAccessState` flips to `denied` and the dialog
 never returns; after the fix the state stays, the OSStatus is logged and
 the one-per-day interactive retry shows the dialog again.
+
+### Problem 3 — the token parser mixes OAuth blocks
+
+The keychain item now holds `claudeAiOauth`, `designOauth` and `mcpOAuth[...]`
+side by side. `claudeAccessToken(fromJSONObject:)` took the first non-empty
+`accessToken` found anywhere (depth-first over a Swift dictionary, order
+unspecified), so it could return the Claude Design token paired with
+`claudeAiOauth.expiresAt`, and an item whose `claudeAiOauth` is empty
+(signed out) still produced a token.
+
+### Fix 3
+
+When the `claudeAiOauth` block exists it alone decides; an empty block means
+signed out. Layouts without that block (a flat credentials file) keep the
+tolerant search. `AIUsageProviderClaudeTokenTests` (3).
+
+### Problem 4 — `five_hour: null` is reported as "unexpected data"
+
+While no 5-hour window is open the endpoint returns `five_hour: null` and
+still reports the weekly windows. `claudeOAuthResponsePayload` required the
+session window, returned nil, the fetcher recorded `parseError` and the
+module showed stale numbers ("Claude usage API returned unexpected data —
+data from …") for as long as the user was idle.
+
+### Fix 4
+
+The overall remaining figure is the smallest window present (session or
+weekly); `currentSessionRemainingPercent` is null when there is no open
+session; a response without any window is still rejected.
+`AIUsageProviderOAuthPayloadTests` (3). Full suite: 81 tests, 0 failures.

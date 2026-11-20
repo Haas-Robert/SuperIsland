@@ -255,6 +255,18 @@ ignored (self-heals existing installs); failed reads log their OSStatus.
 `AIUsageProviderKeychainStateTests`, `AIUsageProviderCodexFallbackTests`,
 `node --test Extensions/ai-usage/`. PR draft: `PR_DRAFT_AI_USAGE_KEYCHAIN.md`.
 
+**Second commit on the same PR** (`364fd84`, local `81906d8`), found while
+verifying: (4) the token parser took the first non-empty `accessToken`
+anywhere in the keychain item — it now also holds `designOauth` and
+`mcpOAuth` blocks — so it could pick the Claude Design token or "find" a
+token in a signed-out item; `claudeAiOauth` alone decides now. (5) The
+endpoint returns `five_hour: null` while no 5-hour window is open and the
+builder required it, so an idle user got "unexpected data" and stale
+numbers; the smallest present window is used, session figure null.
+Tests: `AIUsageProviderClaudeTokenTests`, `AIUsageProviderOAuthPayloadTests`,
+and the local `AIUsageProviderPersistableTests` (payload stays valid JSON
+for the real response layout).
+
 **Recovery on this Mac.** `claude auth login` in a terminal (puts a token
 back into the keychain), then open the AI Usage tab and keep it open until
 the macOS keychain dialog appears → "Always Allow". With the fixed build
