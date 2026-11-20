@@ -1,4 +1,4 @@
-# PR draft — not yet opened (2026-11-20)
+# PR draft — opened as shobhit99/SuperIsland#114 on 2026-11-20
 
 Branch: `fix/ai-usage-keychain-state` → `shobhit99/SuperIsland:main`
 (based on upstream `68cce87`, single commit `8e12c3a`)

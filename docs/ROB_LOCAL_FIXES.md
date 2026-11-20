@@ -317,7 +317,7 @@ branch/merge from `rob/local-build`, and update the table below.
 | Notch side slots + compact notifications | PR #102 open (2026-08-19) | `7a5f203` | yes |
 | Agents Status worktree labels + turn runtime + session persistence | PR #103 open (2026-08-21, extended 2026-08-22) | `d429914`, `025f008` | yes |
 | Weather multi-day forecast | PR #104 open (2026-08-22) | `feat/weather-forecast` | yes |
-| AI Usage: background keychain failure ≠ denial, Codex stale fallback | not opened yet (2026-11-20) | `fix/ai-usage-keychain-state` (`8e12c3a`) | yes |
+| AI Usage: background keychain failure ≠ denial, Codex stale fallback | PR #114 open (2026-11-20) | `fix/ai-usage-keychain-state` (`8e12c3a`) | yes |
 | App Nap throttling refresh timers | PR #107 open (2026-09-03) | `fix/prevent-app-nap` | yes |
 | HUD content sticks in the compact island | PR #109 open (2026-09-15) | `fix/hud-restores-module` | yes |
 | Agents Status activation retry + offline probe | PR #110 open (2026-10-08) | `32f8867` (branch `fix/agents-status-activation-retry`) | yes |
