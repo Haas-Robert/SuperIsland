@@ -257,6 +257,9 @@ function codexModel(usage) {
 
   var extraLine = codex.hasCredits === true ? "Credits available" : null;
 
+  var detail = typeof codex.statusLabel === "string" ? codex.statusLabel : null;
+  if (codex.stale === true && !detail) detail = "Showing cached data";
+
   return {
     title: "Codex",
     planLine: planLine,
@@ -266,7 +269,7 @@ function codexModel(usage) {
     color: rows.length > 0 ? usedColor(maxUsed) : "gray",
     text: rows.length > 0 ? formatPercent(maxUsed) : "--",
     progress: rows.length > 0 ? maxUsed / 100 : 0,
-    detail: withSource(null, source),
+    detail: withSource(detail, source),
     extraLine: extraLine
   };
 }
