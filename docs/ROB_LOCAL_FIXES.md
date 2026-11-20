@@ -17,6 +17,7 @@ or Authorization headers here.
 | `main` | Mirrors `upstream/main`, never carries local commits |
 | `fix/weather-location` | Weather fix only (PR 1 candidate) |
 | ~~`fix/claude-ai-usage`~~ | merged upstream as PR #98 (`d0a3451`); local branch deleted 2026-10-08 |
+| `fix/ai-usage-keychain-state` | AI Usage: background keychain failure ≠ denial, Codex stale fallback (PR candidate, 2026-11-20) |
 | `rob/local-build` | Both fixes merged + local-build identity changes |
 
 ## Fix 1: Weather showed nothing (Core Location assertion)
@@ -217,6 +218,49 @@ for ~27 s before reporting failure, and while offline schedules a 5 s
 one-shot reconnect probe; `waitForListening` logs a warning on timeout.
 Node tests: `node --test Extensions/agents-status/test_index.js`.
 
+## Fix: AI Usage stuck on "Claude Code sign-in not found" / Codex "No data"
+
+**Symptom (2026-11-20).** Claude column: "Claude Code sign-in not found —
+data from 21:58" with `aiUsage.claude.keychainAccessState = denied` and
+`keychainAccessDeniedAt` advancing every poll, no `keychainPromptedAt`.
+Codex column: "No data | Auth token" although the endpoint answered 200
+to the app itself (visible in `~/Library/Caches/com.workview.SuperIsland.rob/
+Cache.db`, response `Date` header = time of the app's last request).
+
+**Root causes.**
+
+1. The Claude Code CLI was logged out (`claude auth status` → loggedIn
+   false); the keychain item `Claude Code-credentials` holds an empty
+   `claudeAiOauth`. Desktop-app Code-tab sessions authenticate through the
+   host and do not leave a token in the keychain. Not an app bug — the
+   label is accurate — but see the limitation below.
+2. The app had also lost the ACL/partition grant for the item (partition
+   list back to `apple-tool:`), and a background read of an item we are
+   not authorized for returns `errSecAuthFailed` on macOS 26/27. The
+   provider treated that as a user denial → sticky `denied` → the
+   "allow access" dialog never came back.
+3. Codex had no last-good fallback and `fetchJSON` swallowed errors, so
+   one failed poll showed "No data" until the next refresh; with the
+   module hidden (lowPower suspends the poll) that stale snapshot is what
+   the tab shows when opened.
+
+**Fix** (`fix/ai-usage-keychain-state`, `8e12c3a`, cherry-picked to
+`rob/local-build` as `354ce58`; local renderer tweak `2712839`):
+`claudeKeychainAccessState(after:interactive:)` marks `denied` only after
+an interactive attempt; a stored denial without a prompt record is
+ignored (self-heals existing installs); failed reads log their OSStatus.
+`codexFallbackPayload` serves the last payload as `oauth-api-stale` with a
+"data from HH:mm" label; `fetchJSON` logs status/error/timeout. The local
+`index.js` shows that label in the Codex column. Tests:
+`AIUsageProviderKeychainStateTests`, `AIUsageProviderCodexFallbackTests`,
+`node --test Extensions/ai-usage/`. PR draft: `PR_DRAFT_AI_USAGE_KEYCHAIN.md`.
+
+**Recovery on this Mac.** `claude auth login` in a terminal (puts a token
+back into the keychain), then open the AI Usage tab and keep it open until
+the macOS keychain dialog appears → "Always Allow". With the fixed build
+no `defaults delete` is needed; with the old build delete
+`aiUsage.claude.keychainAccessState` and `keychainAccessDeniedAt` first.
+
 ## Building
 
 ```
@@ -273,6 +317,7 @@ branch/merge from `rob/local-build`, and update the table below.
 | Notch side slots + compact notifications | PR #102 open (2026-08-19) | `7a5f203` | yes |
 | Agents Status worktree labels + turn runtime + session persistence | PR #103 open (2026-08-21, extended 2026-08-22) | `d429914`, `025f008` | yes |
 | Weather multi-day forecast | PR #104 open (2026-08-22) | `feat/weather-forecast` | yes |
+| AI Usage: background keychain failure ≠ denial, Codex stale fallback | not opened yet (2026-11-20) | `fix/ai-usage-keychain-state` (`8e12c3a`) | yes |
 | App Nap throttling refresh timers | PR #107 open (2026-09-03) | `fix/prevent-app-nap` | yes |
 | HUD content sticks in the compact island | PR #109 open (2026-09-15) | `fix/hud-restores-module` | yes |
 | Agents Status activation retry + offline probe | PR #110 open (2026-10-08) | `32f8867` (branch `fix/agents-status-activation-retry`) | yes |
@@ -296,4 +341,6 @@ build 2026-08-21.
   (`five_hour`, `seven_day*`, `utilization`, `resets_at`) may change.
 - Claude token refresh is not implemented (by design): when the keychain
   token expires, the module shows "token expired" until Claude Code runs
-  and rotates it.
+  and rotates it. Since 2026-11 the desktop app's Code tab no longer keeps
+  the keychain item filled (host-side auth), so the module depends on the
+  CLI being logged in (`claude auth login`) and run now and then.
